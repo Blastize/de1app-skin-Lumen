@@ -11,6 +11,16 @@ GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor and SDB.
 running on the tablet.** 0.17.0 adds a **Curve** control to the grind tile,
 opening GrindAdvisor's calibration plot directly.
 
+## The home screen
+
+![Lumen home screen](docs/screenshot.png)
+
+Everything above is one page: the grind recommendation with its method and
+confidence, the last shot's numbers, the full shot graph, and the next shot's
+bean and targets. A light theme ships alongside this dark one — it is not an
+inversion, since on a pale ground the panels have to sit *brighter* than the
+backdrop and let the shadow do the separating.
+
 ## What the home screen does
 
 | Tile | Shows | Tap |
