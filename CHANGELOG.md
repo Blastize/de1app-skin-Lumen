@@ -1,5 +1,113 @@
 # Changelog — Lumen
 
+## 0.19.0 — tap-rate acceleration on the grind / dose / yield steppers — TABLET-VERIFIED 2026-08-14
+
+**Safety status: no new settings and no new writes.** Same fields as 0.18.0,
+same clamps; only the per-tap step size changed.
+
+A slow tap on the GRIND, DOSE or YIELD stepper moves **0.1**. Taps in quick
+succession — each within 700 ms of the last — escalate to **0.5** after
+three and **1.0** after six, so a big adjustment does not take forty taps.
+A pause or a direction change drops straight back to 0.1 (so correcting an
+overshoot is always fine-grained). RATIO keeps its fixed 0.1, and the
+machine steppers on the settings page keep their own increments.
+
+The app's legacy canvas buttons fire once per press — there is no
+press-and-hold event to hook — so "hold to repeat" is not possible; the
+fast-tap ladder is the acceleration mechanism.
+
+## 0.18.0 — rail removed, next-shot steppers, steam heater labelled honestly — TABLET-VERIFIED 2026-08-14
+
+**Safety status: this version adds settings writes in two groups, each only
+on an explicit tap and each clamped.**
+
+*Next-shot steppers (home strip):* `grinder_dose_weight` (Set dose, and the
+±0.5 dose stepper clamped 2..40), `grinder_setting` (grind stepper,
+0..100), `final_desired_shot_weight` / `final_desired_shot_weight_advanced`
+(yield and ratio steppers, 0..200; the `_advanced` variant only for
+`settings_2c` profiles, mirroring DSx2's saw stepper). When DYE is loaded,
+its staged `next_grinder_setting` / `next_grinder_dose_weight` are kept in
+step — the exact pairing DYE's own DSx2 stepper performs
+(`setup_DSx2.tcl change_grinder_setting`).
+
+*Machine steppers (Lumen settings page, mirroring Streamline's settings
+column):* `espresso_temperature` (Brew ±0.5°C, guarded 70..110, via the
+core's `change_espresso_temperature` so step-temperature and advanced
+profile frames follow), `steam_timeout` + `steam_disabled` (Steam ±5 s,
+0..255, 0 = off), `flush_seconds` (Flush ±1 s, 3..254), `water_volume`
+(Hot Water ±10 ml, 10..250). Applied with `save_settings` + the core's own
+`save_settings_to_de1`, debounced by 1 s (Streamline's
+`save_profile_and_update_de1_soon` pattern) so a run of taps lands as one
+save and one BLE update.
+
+*Preferences:* `lumen_theme`, `live_graph_smoothing_technique`, and the new
+`lumen_chart_stages` (Stages toggle, boolean).
+
+The Shot history button only opens the Shot History Editor; any edits or
+deletions there are that plugin's own, behind its own preview/confirm flow.
+No database is opened and no file in `history/` or `history_v2/` is
+written, renamed or deleted by Lumen itself.
+
+### Steam page: 158°C explained, not hidden
+
+The reported "incorrect steam temp reaching 158°C" is a real sensor reading:
+the steam page showed `steamtemp_text`, which is the **steam heater**
+(`ShotSample(SteamTemp)`), and this machine's steam set point is 160°C — the
+heater idling at its set point, the same value every stock skin displays. It
+was mislabelled, not miscomputed. The column is now labelled **STEAM
+HEATER**, shows an integer value, and states `target 160°C` beneath it, so
+the number reads as intentional rather than absurd.
+
+### Action rail removed; steppers added to the next-shot strip
+
+* The Espresso/Steam/Water/Flush rail is gone (owner request — the machine's
+  GHC covers those). The top tiles and chart span the full 16..1324 width.
+* **Settings and Sleep survive** in their own small side panel to the right
+  of the next-shot strip (owner's layout) — without them the skin would be
+  a dead end with no way to change skins.
+* The next-shot strip gains **Streamline-style stepper groups** — the live
+  value sits BETWEEN the − and + pills — for all four facts: GRIND (±0.1),
+  DOSE (±0.5 g, clamped 2..40 like DSx2's dose stepper, DYE's staged
+  `next_grinder_dose_weight` kept in step), YIELD (±0.5 g) and RATIO (±0.1).
+  No DYE trip needed. The strip's RATIO now shows one decimal, matching its
+  0.1 increment.
+* The strip's bottom row is one 48-high rhythm: **scale readout, Set dose
+  (under DOSE), Scan bag (under YIELD) and Edit (under RATIO)** — the scale
+  controls belong with the next shot, not the Last shot card (owner note).
+  The readout still taps to force a scale reconnect.
+* The Last shot tile gains a **Shot history** shortcut opening the Shot
+  History Editor's card list (edit and soft-delete past shots) via its
+  public `open_page`; the editor captures the return page itself, so Done
+  comes straight back home. If the plugin is not loaded the tap logs an
+  ERROR line rather than failing silently.
+* **Stage separators on the chart**: a dashed vertical line at every frame
+  change (preinfusion → extraction → decline...), the same
+  `espresso_state_change` element every stock skin draws (mechanism from
+  Streamline skin.tcl:3915). A **Stages / No stages** pill sits beside
+  Raw/Smooth and toggles them via `element configure -hide` (Insight's
+  mechanism), persisted in `lumen_chart_stages`. The element is never
+  smoothed — a spline would bend the spikes.
+* **The vertical-line-at-0s artifact on the loaded last shot is gone**: a
+  saved shot's first samples repeat elapsed = 0.0 while the y-values move,
+  which plotted as a vertical line ending in a stray point. The loader now
+  slices every series from the first strictly positive elapsed value (all
+  series are appended per-sample, so one index aligns them all).
+* **The Lumen settings page gained a machine column** (owner request,
+  Streamline-style): BREW temperature, STEAM time (steam flow shown
+  beneath), FLUSH time and HOT WATER volume (water temperature shown
+  beneath), each with the same − value + stepper group as the home strip.
+  The right column keeps THEME (its button is plain glass, so it renders
+  dark in the dark theme and light in the light theme) and DECENT APP
+  (bigger accent Open button). The Chart lines row was removed — the
+  chart's own pills already cover it. Columns are 460/500 wide with 170
+  clear on both page edges; Done stays centred at the bottom.
+* Home background PNGs regenerated (`tools/make_home_bg.py` layout mirrors
+  `_init_layout`). `chart_bg` samples are unchanged (#141517 / #DDE0E4).
+
+Verified off-device: `tools/check_skin.tcl` passes in all three data states,
+no two tap targets intersect, and the new stepper procs byte-compile.
+**Not yet tablet-verified.**
+
 ## 0.17.0 — Curve opens from the grind tile — TABLET-VERIFIED 2026-08-02
 
 **Safety status: unchanged.** Still exactly three settings written, each only
