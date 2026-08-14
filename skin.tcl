@@ -5,18 +5,40 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.15.0  (Done restarts the app when the theme changed)
+#  Version: 0.19.0  (tap-rate acceleration on the grind/dose/yield steppers)
 #
 #  SAFETY STATUS: no database is opened, and no file in history/ or
 #  history_v2/ is read, written, renamed or deleted.
 #
-#  It writes exactly THREE ::settings values, each only on an explicit tap:
-#    live_graph_smoothing_technique  -- Raw/Smooth toggle on the chart
-#    lumen_theme                     -- Dark/Light toggle in Lumen settings
-#    grinder_dose_weight             -- "Set dose" from the scale reading
-#  Nothing else in ::settings is touched. grinder_dose_weight is the field
-#  shot.tcl records as the shot's dose, so that one is real data: it refuses
-#  to store a zero or negative reading.
+#  Every ::settings write happens only on an explicit tap, and every stepper
+#  clamps its value so a runaway tap cannot write junk.
+#
+#  Preferences (home chart pills + Lumen settings page):
+#    live_graph_smoothing_technique  -- Raw/Smooth toggle
+#    lumen_chart_stages              -- Stages toggle
+#    lumen_theme                     -- Dark/Light toggle
+#
+#  Next-shot steppers (home strip):
+#    grinder_dose_weight             -- "Set dose" from the scale reading,
+#                                       and the -/+ dose stepper (2..40)
+#    grinder_setting                 -- the -/+ grind stepper (0..100)
+#    final_desired_shot_weight       -- the -/+ yield and ratio steppers
+#    final_desired_shot_weight_advanced -- same, when the profile is 2c
+#  DYE's staged next_grinder_setting / next_grinder_dose_weight are kept in
+#  step when DYE is loaded -- the same pairing DYE's own DSx2 stepper
+#  performs (setup_DSx2.tcl change_grinder_setting). grinder_dose_weight is
+#  the field shot.tcl records as the shot's dose, so that one is real data:
+#  "Set dose" refuses a zero or negative reading.
+#
+#  Machine steppers (Lumen settings page, mirroring Streamline's column):
+#    espresso_temperature            -- Brew, via the core's
+#                                       change_espresso_temperature so step
+#                                       and advanced profile frames follow
+#    steam_timeout, steam_disabled   -- Steam time (0 = off)
+#    flush_seconds                   -- Flush time (3..254)
+#    water_volume                    -- Hot water volume (10..250)
+#  These are persisted with save_settings and sent to the machine with the
+#  core's own save_settings_to_de1, debounced by 1s (Streamline's pattern).
 #
 #  It hands off to three plugins -- GrindAdvisor's result popup, DYE's
 #  next-shot editor, Bean Scanner's capture page -- and any writing those do
@@ -45,7 +67,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.17.0"
+    variable version "0.19.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -68,6 +90,9 @@ namespace eval ::lumen {
 
     variable theme_mode   "dark"
     variable pending_theme ""   ;# set when a theme change needs a restart
+
+    # after-id of the debounced machine-settings save/send (settings page).
+    variable machine_apply_id ""
 }
 
 #############################################################################
@@ -179,48 +204,66 @@ proc ::lumen::_init_layout {} {
     set L(radius)  26          ;# glass panel corner
     set L(radius_sm) 16
 
-    # ---- action rail (left) --------------------------------------------
-    set L(rail_x)   16 ; set L(rail_y)  16
-    set L(rail_w)  136 ; set L(rail_h) 768
-    set L(rail_pad)  10
-    set L(rail_gap)  10        ;# 4*148 + 2*52 + 5*10 = 746 of 748 inner
-    set L(rail_btn_h) 148      ;# 4 main actions
-    set L(rail_sml_h)  52      ;# settings / sleep
+    # ---- dashboard (full width; the action rail was removed in 0.18.0:
+    # the espresso/steam/water/flush buttons duplicated the machine's own
+    # GHC controls and the width was needed for the next-shot steppers) ----
+    set L(col_x)     16
+    set L(col_w)   1308
 
-    # ---- dashboard column ----------------------------------------------
-    set L(col_x)    184
-    set L(col_w)   1140
+    set L(grind_x)   16 ; set L(grind_y)  16
+    set L(grind_w)  650 ; set L(grind_h) 236
 
-    set L(grind_x)  184 ; set L(grind_y)  16
-    set L(grind_w)  560 ; set L(grind_h) 236
+    set L(last_x)   682 ; set L(last_y)   16
+    set L(last_w)   642 ; set L(last_h)  236
 
-    set L(last_x)   760 ; set L(last_y)   16
-    set L(last_w)   564 ; set L(last_h)  236
+    set L(chart_x)   16 ; set L(chart_y) 268
+    set L(chart_w) 1308 ; set L(chart_h) 332
 
-    set L(chart_x)  184 ; set L(chart_y) 268
-    set L(chart_w) 1140 ; set L(chart_h) 332
+    set L(bean_x)    16 ; set L(bean_y)  616
+    set L(bean_w)  1124 ; set L(bean_h)  168
 
-    set L(bean_x)   184 ; set L(bean_y)  616
-    set L(bean_w)  1140 ; set L(bean_h)  168
+    # Side panel to the strip's right: Settings and Sleep, stacked. Its own
+    # glass panel so the system actions read as separate from shot prep.
+    set L(side_x)  1156 ; set L(side_w)   168
+    set L(side_btn_x) 1170 ; set L(side_btn_w) 140 ; set L(side_btn_h) 60
+    set L(side_y1)  634 ; set L(side_y2)  706
 
-    # Bean strip internals: identity block, four facts, two action buttons.
-    set L(bean_id_x)    208
-    set L(bean_id_w)    272
-    set L(bean_fact_x)  504
-    set L(bean_fact_w)  156
-    set L(bean_act_x)  1150
-    set L(bean_act_w)   150
-    set L(bean_act_h)    56
-    set L(bean_act_gap)   8
-    # 56 + 8 + 56 = 120 in a 168 strip, so 24 clear above and below.
-    set L(bean_act_y)   640
+    # Bean strip internals: identity block, then four Streamline-style
+    # stepper groups ( [-]  value  [+] with the value BETWEEN the pills ),
+    # a scale row beneath, and a 2x2 action grid on the right.
+    set L(bean_id_x)    40
+    set L(bean_id_w)    280
 
-    # Scale row, under the fact values (which end ~690). 706..754 inside the
-    # strip's 764 content edge, so 16 clear above and 10 below.
-    set L(scale_y)      706
+    # Four columns spread EVENLY across the strip content (320..1116):
+    # every control is 176 wide on a 206 pitch, so both the stepper row and
+    # the bottom row share one grid with equal 30px gaps, ending flush at
+    # the strip's inner edge (938 + 176 = 1114).
+    set L(bean_fact_x)  320
+    set L(bean_fact_w)  206        ;# column pitch
+
+    # Stepper group internals: pill, gap, value span, gap, pill = 176.
+    # Label row sits above at 636; pills 662..710.
+    set L(step_w)       44
+    set L(step_gap)      6
+    set L(step_val_w)   76
+    set L(step_y)      662
+    set L(step_h)       48
+
+    # Bottom row of the strip, y 722..770 (14 clear to the strip edge):
+    # scale readout, Set dose, Scan bag, Edit -- on the SAME 206-pitch
+    # grid as the stepper groups above, one control per column.
+    set L(scale_y)      722
     set L(scale_h)       48
-    set L(scale_read_x) 504 ; set L(scale_read_w) 190   ;# live readout
-    set L(scale_set_x)  710 ; set L(scale_set_w)  190   ;# Set dose button
+    set L(scale_read_x) 320 ; set L(scale_read_w) 176   ;# live readout
+    set L(scale_set_x)  526 ; set L(scale_set_w)  176   ;# Set dose button
+    set L(act_scan_x)   732 ; set L(act_edit_x)   938   ;# Scan bag / Edit
+    set L(act_w)        176 ; set L(act_h)         48
+
+    # Shot history shortcut, bottom row of the LAST SHOT tile, centred in
+    # the tile: 682 + (642-200)/2 = 903. (Values end ~150; 180..228 in a
+    # tile that ends at 252, so 24 clear below.)
+    set L(hist_x)   903 ; set L(hist_y)  180
+    set L(hist_w)   200 ; set L(hist_h)   48
 
     set L(pad_x)     24        ;# inner padding of a tile
     set L(pad_y)     20
@@ -737,12 +780,14 @@ proc ::lumen::data::next_yield {} {
     return [_num [_target_raw] 1]
 }
 
+# One decimal, matching the +/- stepper's 0.1 increment (and fitting the
+# 76px value span between the stepper pills).
 proc ::lumen::data::next_ratio {} {
     set d [_s ::settings(grinder_dose_weight)]
     set y [_target_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
     if { [catch { set r [expr {double($y) / double($d)}] }] } { return "--" }
-    return [format "1:%.2f" $r]
+    return [format "1:%.1f" $r]
 }
 
 # Live scale weight for the flow pages. Shows "--" rather than blank here,
@@ -776,6 +821,61 @@ proc ::lumen::data::steam_secs {} {
     set t 0
     catch { set t [steam_pour_timer] }
     return "[format %.0f [_sane_secs $t]]s"
+}
+
+# The steam page's temperature is the STEAM HEATER sensor
+# (::de1(steam_heater_temperature) <- ShotSample(SteamTemp), de1_de1.tcl:544),
+# which idles at the steam set point -- ~158C when the setting is 160. That
+# is a real reading, not a glitch, but shown as plain "TEMP" it looks like a
+# broken value. The column is labelled STEAM HEATER and this line states the
+# set point underneath, so the number reads as intentional.
+proc ::lumen::data::steam_target_note {} {
+    set t [_s ::settings(steam_temperature)]
+    if { ![string is double -strict $t] || $t <= 0 } { return "" }
+    if { [catch { set out [return_temperature_measurement $t 1] }] } { return "" }
+    return "[translate {target}] $out"
+}
+
+# ---- machine stepper readouts (Lumen settings page) -----------------------
+
+proc ::lumen::data::brew_temp_value {} {
+    set t [_s ::settings(espresso_temperature)]
+    if { ![string is double -strict $t] } { return "--" }
+    if { [catch { set out [return_temperature_measurement $t 0] }] } { return "--" }
+    return $out
+}
+
+proc ::lumen::data::steam_time_value {} {
+    set v [_s ::settings(steam_timeout)]
+    if { ![string is double -strict $v] } { return "--" }
+    if { $v <= 0 } { return [translate "off"] }
+    return "[expr {round($v)}]s"
+}
+
+# steam_flow is stored as ml/s x 100 (Streamline steps it by 10 = 0.1 ml/s).
+proc ::lumen::data::steam_flow_note {} {
+    set v [_s ::settings(steam_flow)]
+    if { ![string is double -strict $v] } { return "" }
+    return "[format %.1f [expr {$v / 100.0}]] mL/s"
+}
+
+proc ::lumen::data::flush_time_value {} {
+    set v [_s ::settings(flush_seconds)]
+    if { ![string is double -strict $v] } { return "--" }
+    return "[expr {round($v)}]s"
+}
+
+proc ::lumen::data::water_volume_value {} {
+    set v [_s ::settings(water_volume)]
+    if { ![string is double -strict $v] } { return "--" }
+    return "[expr {round($v)}] ml"
+}
+
+proc ::lumen::data::water_temp_note {} {
+    set t [_s ::settings(water_temperature)]
+    if { ![string is double -strict $t] } { return "" }
+    if { [catch { set out [return_temperature_measurement $t 1] }] } { return "" }
+    return $out
 }
 
 # Shows what the theme WILL be, so the button reads as a toggle rather than
@@ -812,6 +912,11 @@ proc ::lumen::data::version_line {} {
 proc ::lumen::data::smoothing_label {} {
     if { [::lumen::chart_smoothing] eq "linear" } { return [translate "Raw"] }
     return [translate "Smooth"]
+}
+
+proc ::lumen::data::stages_label {} {
+    if { [::lumen::stages_shown] } { return [translate "Stages"] }
+    return [translate "No stages"]
 }
 
 proc ::lumen::data::live_weight {} {
@@ -889,6 +994,19 @@ proc ::lumen::chart_smoothing {} {
     return $v
 }
 
+# Stage separators shown? Lumen preference, default on.
+proc ::lumen::stages_shown {} {
+    set v 1
+    catch {
+        if { [info exists ::settings(lumen_chart_stages)] \
+          && $::settings(lumen_chart_stages) ne "" } {
+            set v $::settings(lumen_chart_stages)
+        }
+    }
+    if { ![string is boolean -strict $v] } { set v 1 }
+    return [expr {$v ? 1 : 0}]
+}
+
 # Loads the most recent saved shot into the live chart vectors, once, at
 # startup. Without this the home chart is blank every time you open the app
 # until you pull a shot -- the vectors are created empty at launch and only
@@ -920,6 +1038,26 @@ proc ::lumen::load_last_shot_curves {} {
         return
     }
     if { ![info exists props(espresso_elapsed)] } { return }
+
+    # A saved shot's first samples often repeat elapsed = 0.0 while the
+    # y-values already move (captured before the shot timer starts). Plotted,
+    # that is a vertical line at x=0 ending in a stray point. Slice every
+    # series from the first strictly positive elapsed value; all series are
+    # appended per-sample by the app, so one index aligns them all.
+    set skip 0
+    foreach t $props(espresso_elapsed) {
+        if { ![string is double -strict $t] || $t > 0.0 } { break }
+        incr skip
+    }
+    if { $skip > 0 } {
+        foreach v {espresso_elapsed espresso_pressure espresso_flow
+                   espresso_flow_weight espresso_state_change
+                   espresso_weight espresso_temperature_basket} {
+            if { [info exists props($v)] } {
+                set props($v) [lrange $props($v) $skip end]
+            }
+        }
+    }
 
     # Vectors stored verbatim in the file.
     foreach v {espresso_elapsed espresso_pressure espresso_flow
@@ -1013,11 +1151,28 @@ proc ::lumen::chart_setup { widget } {
         l_temp     espresso_temperature_basket10th    $C(c_temp)   $lw2 ] {
         if { [catch {
             $widget element create $name -xdata espresso_elapsed -ydata $vector \
-                -symbol none -label "" -linewidth $width -color $colour \
-                -smooth $sm -pixels 0
+                -smooth $sm -symbol none -label "" -linewidth $width \
+                -color $colour -pixels 0
         } err] } {
             msg -ERROR "Lumen: could not create chart element $name: $err"
         }
+    }
+
+    # Stage separators: espresso_state_change is 0 except at frame changes,
+    # where the app appends 10000000 (gui.tcl:3487) -- clipped to the 0..10
+    # axis that plots as a dashed vertical line at each transition
+    # (preinfusion -> extraction -> decline...). Mechanism from Streamline
+    # skin.tcl:3915; toggled via -hide, the mechanism Insight uses for its
+    # optional chart lines. NOT smoothed -- a spline would bend the spikes.
+    set dash [expr {int(max(2, round(8 * $L(font_scale))))}]
+    if { [catch {
+        $widget element create l_stages -xdata espresso_elapsed \
+            -ydata espresso_state_change -symbol none -label "" \
+            -linewidth $lw2 -color $C(ink_3) -pixels 0 \
+            -dashes [list $dash $dash] \
+            -hide [expr {[stages_shown] ? "no" : "yes"}]
+    } err] } {
+        msg -ERROR "Lumen: could not create the stage separators: $err"
     }
 
     catch { gridconfigure $widget }
@@ -1042,6 +1197,16 @@ proc ::lumen::chart_apply_smoothing {} {
     }
 }
 
+proc ::lumen::chart_apply_stages {} {
+    variable chart_widgets
+    set hide [expr {[stages_shown] ? "no" : "yes"}]
+    foreach widget $chart_widgets {
+        if { [catch { $widget element configure l_stages -hide $hide } err] } {
+            msg -ERROR "Lumen: could not toggle the stage separators: $err"
+        }
+    }
+}
+
 #############################################################################
 #  Actions
 #
@@ -1050,7 +1215,33 @@ proc ::lumen::chart_apply_smoothing {} {
 #  worse to diagnose than one that leaves a line in the log.
 #############################################################################
 
-namespace eval ::lumen::act {}
+namespace eval ::lumen::act {
+    # Per-stepper tap-rate state: key -> {last_ms streak dir}.
+    variable accel
+    array set accel {}
+}
+
+# Tap-rate acceleration for the grind / dose / yield steppers (owner
+# request): a slow tap moves 0.1; taps in quick succession (each within
+# 700ms of the last) escalate to 0.5 after three and 1.0 after six, so a
+# big adjustment does not take forty taps. A pause or a direction change
+# drops straight back to 0.1. The app's legacy buttons fire once per press
+# (there is no hold event), so holding registers as its taps do.
+proc ::lumen::act::_accel_step { key dir } {
+    variable accel
+    set now [clock milliseconds]
+    set last 0 ; set streak 0 ; set lastdir 0
+    catch { lassign $accel($key) last streak lastdir }
+    if { $dir == $lastdir && ($now - $last) < 700 } {
+        incr streak
+    } else {
+        set streak 0
+    }
+    set accel($key) [list $now $streak $dir]
+    if { $streak >= 6 } { return 1.0 }
+    if { $streak >= 3 } { return 0.5 }
+    return 0.1
+}
 
 proc ::lumen::act::grind_popup {} {
     if { [catch { ::plugins::GrindAdvisor::show_last_recommendation } err] } {
@@ -1101,6 +1292,19 @@ proc ::lumen::act::dye_next {} {
 # The one place this skin writes a setting. live_graph_smoothing_technique is
 # a stock DE1app preference (default "linear"); "catrom" is the Catmull-Rom
 # spline the chart widget already understands. Same data, rounded corners.
+# Second chart preference, alongside smoothing: show/hide the stage
+# separator lines. lumen_chart_stages is a Lumen setting (like lumen_theme).
+proc ::lumen::act::toggle_stages {} {
+    set new [expr {[::lumen::stages_shown] ? 0 : 1}]
+    if { [catch {
+        set ::settings(lumen_chart_stages) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the stages preference: $err"
+    }
+    ::lumen::chart_apply_stages
+}
+
 proc ::lumen::act::toggle_smoothing {} {
     set new "catrom"
     if { [::lumen::chart_smoothing] ne "linear" } { set new "linear" }
@@ -1206,6 +1410,183 @@ proc ::lumen::act::set_dose_from_scale {} {
     }
 }
 
+# ---- next-shot steppers ---------------------------------------------------
+#
+# Mechanisms copied from the proven implementations, not invented here:
+#   grind  -- DYE's own setup_DSx2.tcl change_grinder_setting: stage the
+#             value in DYE's next_grinder_setting AND mirror it into
+#             ::settings(grinder_setting), saving both.
+#   yield  -- DSx2 procs_vars.tcl "saw" stepper: settings_2c profiles keep
+#             their target in final_desired_shot_weight_advanced, everything
+#             else in final_desired_shot_weight.
+#   ratio  -- DSx2 procs_vars.tcl "er" stepper: a ratio change is just a
+#             yield write of dose * new_ratio.
+# Every path clamps, so holding the button cannot write junk.
+
+proc ::lumen::act::adjust_grind { delta } {
+    # Read the same source the strip displays (DYE's staged value first).
+    set cur [::lumen::data::_field grinder_setting]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set dir [expr {$delta >= 0 ? 1 : -1}]
+    set new [expr {double($cur) + $dir * [_accel_step grind $dir]}]
+    if { $new < 0 } { set new 0 } elseif { $new > 100 } { set new 100 }
+    set new [format %.1f $new]
+    if { [catch {
+        if { [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
+            set ::plugins::DYE::settings(next_grinder_setting) $new
+            plugins save_settings DYE
+        }
+        set ::settings(grinder_setting) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not change the grind setting: $err"
+        return
+    }
+    # DYE keeps a human-readable summary of the next shot; refresh it the way
+    # its own stepper does. Absent or old DYE: nothing to refresh.
+    catch { ::plugins::DYE::shots::define_next_desc }
+}
+
+# ---- machine steppers (Lumen settings page) -------------------------------
+#
+# Mechanism from Streamline's settings column: mutate the setting, then
+# persist AND send to the machine, debounced by 1s so a run of taps lands
+# as one save + one BLE update (save_profile_and_update_de1_soon's pattern).
+# save_settings_to_de1 re-sends the shot frames plus the steam / hot-water /
+# flush settings (de1_comms.tcl:1539), so it covers all four rows.
+
+proc ::lumen::act::_apply_machine_settings {} {
+    catch { after cancel $::lumen::machine_apply_id }
+    set ::lumen::machine_apply_id [after 1000 {
+        if { [catch {
+            save_settings
+            save_settings_to_de1
+        } err] } {
+            msg -ERROR "Lumen: could not send the machine settings: $err"
+        }
+    }]
+}
+
+# Brew temperature must go through the core's change_espresso_temperature:
+# it applies the RELATIVE change to every frame of step-temperature and
+# advanced profiles, not just the headline number (vars.tcl:4213).
+proc ::lumen::act::adjust_brew_temp { delta } {
+    set cur [::lumen::data::_s ::settings(espresso_temperature)]
+    if { ![string is double -strict $cur] } { return }
+    set new [expr {double($cur) + $delta}]
+    # Streamline's guard rails: never below 1 or above 110.
+    if { $new < 70.0 || $new > 110.0 } { return }
+    if { [catch { change_espresso_temperature $delta } err] } {
+        msg -ERROR "Lumen: could not change the brew temperature: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+proc ::lumen::act::adjust_steam_time { delta } {
+    set cur [::lumen::data::_s ::settings(steam_timeout)]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set new [expr {round(double($cur) + $delta)}]
+    if { $new < 0 } { set new 0 } elseif { $new > 255 } { set new 255 }
+    if { [catch {
+        set ::settings(steam_timeout) $new
+        # Timeout 0 means steam off; keep the flag in step the way
+        # Streamline's save path does.
+        set ::settings(steam_disabled) [expr {$new == 0 ? 1 : 0}]
+    } err] } {
+        msg -ERROR "Lumen: could not change the steam time: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+proc ::lumen::act::adjust_flush_time { delta } {
+    set cur [::lumen::data::_s ::settings(flush_seconds)]
+    if { ![string is double -strict $cur] } { set cur 5 }
+    set new [expr {round(double($cur) + $delta)}]
+    # Streamline's bounds: 3..254.
+    if { $new < 3 } { set new 3 } elseif { $new > 254 } { set new 254 }
+    if { [catch { set ::settings(flush_seconds) $new } err] } {
+        msg -ERROR "Lumen: could not change the flush time: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+proc ::lumen::act::adjust_water_volume { delta } {
+    set cur [::lumen::data::_s ::settings(water_volume)]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set new [expr {round(double($cur) + $delta)}]
+    if { $new < 10 } { set new 10 } elseif { $new > 250 } { set new 250 }
+    if { [catch { set ::settings(water_volume) $new } err] } {
+        msg -ERROR "Lumen: could not change the hot water volume: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+proc ::lumen::act::adjust_dose { delta } {
+    set cur [::lumen::data::_s ::settings(grinder_dose_weight)]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set dir [expr {$delta >= 0 ? 1 : -1}]
+    set new [expr {double($cur) + $dir * [_accel_step dose $dir]}]
+    # DSx2's dose stepper clamps 2..40; a dose outside that is a mis-tap.
+    if { $new < 2 } { set new 2 } elseif { $new > 40 } { set new 40 }
+    set new [format %.1f $new]
+    if { [catch {
+        if { [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
+            set ::plugins::DYE::settings(next_grinder_dose_weight) $new
+            plugins save_settings DYE
+        }
+        set ::settings(grinder_dose_weight) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not change the dose: $err"
+        return
+    }
+    catch { ::plugins::DYE::shots::define_next_desc }
+}
+
+proc ::lumen::act::_write_yield { new } {
+    if { ![string is double -strict $new] } { return }
+    if { $new < 0 } { set new 0 } elseif { $new > 200 } { set new 200 }
+    set new [format %.1f $new]
+    if { [catch {
+        if { [string trim [::lumen::data::_s ::settings(settings_profile_type)]] eq "settings_2c" } {
+            set ::settings(final_desired_shot_weight_advanced) $new
+        } else {
+            set ::settings(final_desired_shot_weight) $new
+        }
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not change the target yield: $err"
+    }
+}
+
+proc ::lumen::act::adjust_yield { delta } {
+    set cur [::lumen::data::_target_raw]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set dir [expr {$delta >= 0 ? 1 : -1}]
+    _write_yield [expr {double($cur) + $dir * [_accel_step yield $dir]}]
+}
+
+proc ::lumen::act::adjust_ratio { delta } {
+    set d [::lumen::data::_s ::settings(grinder_dose_weight)]
+    if { ![::lumen::data::_is_pos $d] } {
+        msg -NOTICE "Lumen: no dose set, cannot step the ratio"
+        return
+    }
+    set y [::lumen::data::_target_raw]
+    if { ![string is double -strict $y] || $y <= 0 } {
+        set y [expr {double($d) * 2.0}]
+    }
+    # Step the DISPLAYED (rounded) ratio, exactly like DSx2's "er" stepper,
+    # so one tap always moves the visible number by one increment.
+    set r [expr {round(double($y) / double($d) * 10.0) / 10.0 + $delta}]
+    if { $r < 1.0 } { set r 1.0 } elseif { $r > 5.0 } { set r 5.0 }
+    _write_yield [expr {double($d) * $r}]
+}
+
 # Kick a scale reconnect by hand.
 #
 # The core gives up permanently once its automatic retries are spent: on each
@@ -1229,6 +1610,21 @@ proc ::lumen::act::reconnect_scale {} {
         ble_connect_to_scale
     } err] } {
         msg -ERROR "Lumen: could not reconnect the scale: $err"
+    }
+}
+
+# Opens the Shot History Editor's card list -- the shortcut for editing and
+# soft-deleting past shots. open_page is the plugin's public entry, and its
+# settings page captures the page it was opened from by itself, so Done
+# returns straight back here with no bookkeeping on our side.
+proc ::lumen::act::shot_history {} {
+    if { [catch {
+        if { [info procs ::plugins::ShotHistoryEditor::open_page] eq "" } {
+            error "the Shot History Editor plugin is not loaded"
+        }
+        ::plugins::ShotHistoryEditor::open_page ShotHistoryEditor_settings
+    } err] } {
+        msg -ERROR "Lumen: could not open the Shot History Editor: $err"
     }
 }
 
@@ -1338,60 +1734,11 @@ proc ::lumen::build_home {} {
     variable L
     set p "off"
 
-    ####################################################################
-    #  Left action rail
-    ####################################################################
-    glass $p $L(rail_x) $L(rail_y) $L(rail_w) $L(rail_h)
-
-    set bx [expr {$L(rail_x) + $L(rail_pad)}]
-    set bw [expr {$L(rail_w) - 2 * $L(rail_pad)}]
-    set by [expr {$L(rail_y) + $L(rail_pad)}]
-
-    foreach {label action primary} {
-        Espresso  start_espresso  1
-        Steam     start_steam     0
-        Water     start_water     0
-        Flush     start_flush     0
-    } {
-        set fill    $C(glass)
-        set outline $C(glass_brd)
-        set ink     $C(ink_2)
-        if { $primary } {
-            set fill    $C(crema_lo)
-            set outline $C(crema_brd)
-            set ink     $C(crema)
-        }
-
-        glass $p $bx $by $bw $L(rail_btn_h) -radius $L(radius_sm) \
-            -fill $fill -outline $outline
-        txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $L(rail_btn_h) / 2.0}] \
-            [translate $label] -font $L(font_button) -fill $ink \
-            -anchor center -justify center
-
-        add_de1_button $p "say \[translate {$label}\] \$::settings(sound_button_in); $action" \
-            [X $bx] [Y $by] [X [expr {$bx + $bw}]] [Y [expr {$by + $L(rail_btn_h)}]]
-
-        set by [expr {$by + $L(rail_btn_h) + $L(rail_gap)}]
-    }
-
-    # Settings and Sleep. Without these the skin would be a dead end -- there
-    # would be no way back out to change skins again.
-    # Settings opens LUMEN's page, which has the app's own settings one tap
-    # further in. One entry point, and Lumen's options stay discoverable.
-    foreach {label action} {
-        Settings {::lumen::act::open_settings}
-        Sleep    {start_sleep}
-    } {
-        glass $p $bx $by $bw $L(rail_sml_h) -radius $L(radius_sm) -spec 0
-        txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $L(rail_sml_h) / 2.0}] \
-            [translate $label] -font $L(font_caption) -fill $C(ink_3) \
-            -anchor center -justify center
-
-        add_de1_button $p "say \[translate {$label}\] \$::settings(sound_button_in); $action" \
-            [X $bx] [Y $by] [X [expr {$bx + $bw}]] [Y [expr {$by + $L(rail_sml_h)}]]
-
-        set by [expr {$by + $L(rail_sml_h) + $L(rail_gap)}]
-    }
+    # The 0.17 action rail (Espresso/Steam/Water/Flush buttons) is gone:
+    # those duplicated the machine's own GHC controls and the width was
+    # needed for the next-shot steppers. Settings and Sleep -- which must
+    # stay reachable or the skin is a dead end -- moved into the 2x2 action
+    # grid in the next-shot strip.
 
     ####################################################################
     #  Grind recommendation tile  ->  GrindAdvisor result popup
@@ -1407,13 +1754,18 @@ proc ::lumen::build_home {} {
 
     # Vertical budget inside the tile (content runs 36..232 in design px):
     #   label  36..56      hero 60..144     note 150..202     row 206..222
-    var $p $gx [expr {$gy + 24}] {[::lumen::data::grind_next]} \
-        -font $L(font_hero) -fill $C(crema)
-    var $p [expr {$gx + 218}] [expr {$gy + 76}] {[::lumen::data::grind_delta]} \
+    # Hero and note are CENTRED on the tile (owner request); the delta sits
+    # to the right of the widest hero the grind range allows ("50.0" is
+    # ~101px half-width at the 84px mono size, so +120 clears it).
+    set gmid [expr {$L(grind_x) + $L(grind_w) / 2.0}]
+    var $p $gmid [expr {$gy + 24}] {[::lumen::data::grind_next]} \
+        -font $L(font_hero) -fill $C(crema) -anchor n -justify center
+    var $p [expr {$gmid + 120}] [expr {$gy + 76}] {[::lumen::data::grind_delta]} \
         -font $L(font_primary) -fill $C(good)
 
-    var $p $gx [expr {$gy + 114}] {[::lumen::data::grind_note]} \
-        -font $L(font_body) -fill $C(ink_2) -width 470
+    var $p $gmid [expr {$gy + 114}] {[::lumen::data::grind_note]} \
+        -font $L(font_body) -fill $C(ink_2) -width 560 \
+        -anchor n -justify center
 
     # Method chip, top right. Blank until there is a recommendation.
     set mchip_x [expr {$L(grind_x) + $L(grind_w) - $L(pad_x) - 150}]
@@ -1482,6 +1834,18 @@ proc ::lumen::build_home {} {
         incr i
     }
 
+    # --- Shot history shortcut, bottom of the tile: opens the Shot History
+    # Editor's card list (edit and soft-delete past shots). Lives here
+    # because this is the card about past shots; next-shot controls do not.
+    glass $p $L(hist_x) $L(hist_y) $L(hist_w) $L(hist_h) \
+        -radius $L(radius_sm) -spec 0
+    txt $p [expr {$L(hist_x) + $L(hist_w) / 2.0}] \
+        [expr {$L(hist_y) + $L(hist_h) / 2.0}] \
+        [translate "Shot history"] -font $L(font_button) -fill $C(ink_2) \
+        -anchor center -justify center
+    tap $p $L(hist_x) $L(hist_y) $L(hist_w) $L(hist_h) \
+        {::lumen::act::shot_history} "Shot history"
+
     ####################################################################
     #  Shot chart   (real graph widget added in Pass 3)
     ####################################################################
@@ -1501,7 +1865,8 @@ proc ::lumen::build_home {} {
         incr i
     }
 
-    # Raw / Smooth toggle, top right of the chart panel.
+    # Raw / Smooth toggle top right of the chart panel, with the stage
+    # separators toggle beside it -- same pill, same behaviour.
     set tw 140
     set tx [expr {$L(chart_x) + $L(chart_w) - $L(pad_x) - $tw}]
     set ty [expr {$L(chart_y) + 12}]
@@ -1511,6 +1876,14 @@ proc ::lumen::build_home {} {
         {[::lumen::data::smoothing_label]} \
         -font $L(font_label) -fill $C(crema) -anchor center -justify center
     tap $p $tx $ty $tw 34 {::lumen::act::toggle_smoothing} "Smoothing"
+
+    set tx2 [expr {$tx - $tw - 12}]
+    glass $p $tx2 $ty $tw 34 -radius 17 \
+        -fill $C(crema_lo) -outline $C(crema_brd) -spec 0
+    var $p [expr {$tx2 + $tw / 2.0}] [expr {$ty + 17}] \
+        {[::lumen::data::stages_label]} \
+        -font $L(font_label) -fill $C(crema) -anchor center -justify center
+    tap $p $tx2 $ty $tw 34 {::lumen::act::toggle_stages} "Stages"
 
     # The graph widget itself, below the legend row.
     set cgx [expr {$L(chart_x) + $L(pad_x)}]
@@ -1553,29 +1926,47 @@ proc ::lumen::build_home {} {
     var $p $bx2 [expr {$by2 + 72}] {[::lumen::data::bean_sub]} \
         -font $L(font_caption) -fill $C(ink_2) -width $L(bean_id_w)
 
+    # --- four Streamline-style stepper groups: label above, then
+    # [-]  value  [+] with the live value BETWEEN the pills. ASCII glyphs
+    # only (design rule); the mono face renders them cleanly.
     set i 0
-    foreach {k code} [list \
-        [translate "GRIND"]        {[::lumen::data::next_grind]} \
-        [translate "DOSE"]         {[::lumen::data::next_dose]} \
-        [translate "TARGET YIELD"] {[::lumen::data::next_yield]} \
-        [translate "RATIO"]        {[::lumen::data::next_ratio]} ] {
+    foreach {k code minus_code plus_code what} [list \
+        [translate "GRIND"]  {[::lumen::data::next_grind]} \
+            {::lumen::act::adjust_grind -0.1} {::lumen::act::adjust_grind 0.1} "Grind" \
+        [translate "DOSE"]   {[::lumen::data::next_dose]} \
+            {::lumen::act::adjust_dose -0.1}  {::lumen::act::adjust_dose 0.1}  "Dose" \
+        [translate "YIELD"]  {[::lumen::data::next_yield]} \
+            {::lumen::act::adjust_yield -0.1} {::lumen::act::adjust_yield 0.1} "Yield" \
+        [translate "RATIO"]  {[::lumen::data::next_ratio]} \
+            {::lumen::act::adjust_ratio -0.1} {::lumen::act::adjust_ratio 0.1} "Ratio" ] {
         set kx [expr {$L(bean_fact_x) + $i * $L(bean_fact_w)}]
         txt $p $kx $by2 $k -font $L(font_label) -fill $C(ink_3)
-        var $p $kx [expr {$by2 + 26}] $code -font $L(font_data) -fill $C(ink)
+
+        set mx $kx
+        set px2 [expr {$kx + $L(step_w) + $L(step_gap) + $L(step_val_w) + $L(step_gap)}]
+        set mid_y [expr {$L(step_y) + $L(step_h) / 2.0}]
+
+        foreach sx [list $mx $px2] glyph [list "-" "+"] \
+                scode [list $minus_code $plus_code] \
+                lbl [list "$what down" "$what up"] {
+            glass $p $sx $L(step_y) $L(step_w) $L(step_h) \
+                -radius $L(radius_sm) -spec 0
+            txt $p [expr {$sx + $L(step_w) / 2.0}] $mid_y $glyph \
+                -font $L(font_section) -fill $C(crema) \
+                -anchor center -justify center
+            tap $p $sx $L(step_y) $L(step_w) $L(step_h) $scode $lbl
+        }
+
+        # The value, centred between the pills.
+        var $p [expr {$kx + $L(step_w) + $L(step_gap) + $L(step_val_w) / 2.0}] \
+            $mid_y $code -font $L(font_data) -fill $C(ink) \
+            -anchor center -justify center
+
         incr i
     }
 
-    # --- scale row: Set dose under GRIND, live weight under DOSE ----------
-    glass $p $L(scale_set_x) $L(scale_y) $L(scale_set_w) $L(scale_h) \
-        -radius $L(radius_sm) -fill $C(crema_lo) -outline $C(crema_brd)
-    txt $p [expr {$L(scale_set_x) + $L(scale_set_w) / 2.0}] \
-        [expr {$L(scale_y) + $L(scale_h) / 2.0}] [translate "Set dose"] \
-        -font $L(font_button) -fill $C(crema) -anchor center -justify center
-    tap $p $L(scale_set_x) $L(scale_y) $L(scale_set_w) $L(scale_h) \
-        {::lumen::act::set_dose_from_scale} "Set dose"
-
-    # Readout is the same size as the button beside it, and the same size as
-    # the Scan bag / Edit pair on the right, so the strip keeps one rhythm.
+    # --- scale row, under the stepper groups: live readout, then Set dose
+    # aligned under the DOSE group (these belong with the NEXT shot).
     set mid [expr {$L(scale_y) + $L(scale_h) / 2.0}]
     glass $p $L(scale_read_x) $L(scale_y) $L(scale_read_w) $L(scale_h) \
         -radius $L(radius_sm) -spec 0
@@ -1587,43 +1978,67 @@ proc ::lumen::build_home {} {
     var $p [expr {$L(scale_read_x) + $L(scale_read_w) / 2.0}] $mid \
         {[::lumen::data::scale_weight_line]} \
         -font $L(font_data) -fill $C(ink_2) -anchor center -justify center
-
-    # The readout was a dead zone. Tapping it now forces a scale reconnect --
-    # the same affordance every other skin puts on its weight display, and the
-    # only way back once the core has spent its automatic retries. Sits inside
-    # the readout box only: the bean-identity target above stops at
-    # scale_y - xs, and Set dose starts at scale_set_x (694 vs 710), so no two
-    # tap targets overlap.
+    # The readout was a dead zone. Tapping it forces a scale reconnect --
+    # the affordance every other skin puts on its weight display, and the
+    # only way back once the core has spent its automatic retries.
     tap $p $L(scale_read_x) $L(scale_y) $L(scale_read_w) $L(scale_h) \
         {::lumen::act::reconnect_scale} "Scale"
 
-    # Identity + facts open DYE; the two buttons sit outside that region so
-    # no two tap targets overlap.
-    # Stops short of the scale row below and the action buttons to the right,
-    # so no two tap targets overlap.
-    tap $p $L(bean_id_x) $L(bean_y) \
-        [expr {$L(bean_act_x) - $L(bean_id_x) - $L(md)}] \
-        [expr {$L(scale_y) - $L(bean_y) - $L(xs)}] \
+    glass $p $L(scale_set_x) $L(scale_y) $L(scale_set_w) $L(scale_h) \
+        -radius $L(radius_sm) -fill $C(crema_lo) -outline $C(crema_brd)
+    txt $p [expr {$L(scale_set_x) + $L(scale_set_w) / 2.0}] $mid \
+        [translate "Set dose"] \
+        -font $L(font_button) -fill $C(crema) -anchor center -justify center
+    tap $p $L(scale_set_x) $L(scale_y) $L(scale_set_w) $L(scale_h) \
+        {::lumen::act::set_dose_from_scale} "Set dose"
+
+    # --- Scan bag and Edit complete the bottom row, under the YIELD and
+    # RATIO groups, sharing the row's 48-high rhythm.
+    foreach {gx label action accent} [list \
+        $L(act_scan_x) "Scan bag" {::lumen::act::scan_bag} 1 \
+        $L(act_edit_x) "Edit"     {::lumen::act::dye_next} 0 ] {
+        if { $accent } {
+            glass $p $gx $L(scale_y) $L(act_w) $L(act_h) \
+                -radius $L(radius_sm) -fill $C(crema_lo) -outline $C(crema_brd)
+            set ink $C(crema)
+        } else {
+            glass $p $gx $L(scale_y) $L(act_w) $L(act_h) \
+                -radius $L(radius_sm) -spec 0
+            set ink $C(ink_2)
+        }
+        txt $p [expr {$gx + $L(act_w) / 2.0}] \
+            [expr {$L(scale_y) + $L(act_h) / 2.0}] \
+            [translate $label] -font $L(font_button) -fill $ink \
+            -anchor center -justify center
+        tap $p $gx $L(scale_y) $L(act_w) $L(act_h) $action $label
+    }
+
+    # Identity opens DYE. Stops one md short of the stepper columns; the
+    # fact area is all controls now, so DYE editing goes through Edit.
+    tap $p $L(bean_x) $L(bean_y) \
+        [expr {$L(bean_fact_x) - $L(bean_x) - $L(md)}] \
+        $L(bean_h) \
         {::lumen::act::dye_next} "Next shot"
 
-    set ax $L(bean_act_x)
-    set ay $L(bean_act_y)
+    ####################################################################
+    #  Side panel: Settings and Sleep, in their own panel right of the
+    #  strip. They moved here from the removed rail; without them the skin
+    #  is a dead end with no way back to the skin picker.
+    ####################################################################
+    glass $p $L(side_x) $L(bean_y) $L(side_w) $L(bean_h)
 
-    glass $p $ax $ay $L(bean_act_w) $L(bean_act_h) -radius $L(radius_sm) \
-        -fill $C(crema_lo) -outline $C(crema_brd)
-    txt $p [expr {$ax + $L(bean_act_w) / 2.0}] [expr {$ay + $L(bean_act_h) / 2.0}] \
-        [translate "Scan bag"] -font $L(font_button) -fill $C(crema) \
-        -anchor center -justify center
-    tap $p $ax $ay $L(bean_act_w) $L(bean_act_h) \
-        {::lumen::act::scan_bag} "Scan bag"
-
-    set ay [expr {$ay + $L(bean_act_h) + $L(bean_act_gap)}]
-    glass $p $ax $ay $L(bean_act_w) $L(bean_act_h) -radius $L(radius_sm) -spec 0
-    txt $p [expr {$ax + $L(bean_act_w) / 2.0}] [expr {$ay + $L(bean_act_h) / 2.0}] \
-        [translate "Edit"] -font $L(font_button) -fill $C(ink_2) \
-        -anchor center -justify center
-    tap $p $ax $ay $L(bean_act_w) $L(bean_act_h) \
-        {::lumen::act::dye_next} "Edit"
+    foreach {gy label action} [list \
+        $L(side_y1) "Settings" {::lumen::act::open_settings} \
+        $L(side_y2) "Sleep"    {start_sleep} ] {
+        glass $p $L(side_btn_x) $gy $L(side_btn_w) $L(side_btn_h) \
+            -radius $L(radius_sm) -spec 0
+        txt $p [expr {$L(side_btn_x) + $L(side_btn_w) / 2.0}] \
+            [expr {$gy + $L(side_btn_h) / 2.0}] \
+            [translate $label] -font $L(font_button) -fill $C(ink_2) \
+            -anchor center -justify center
+        tap $p $L(side_btn_x) $gy $L(side_btn_w) $L(side_btn_h) \
+            $action $label
+    }
 }
 
 #############################################################################
@@ -1636,7 +2051,7 @@ proc ::lumen::build_home {} {
 #  the tablet shows a blank screen for the whole shot.
 #############################################################################
 
-proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} } {
+proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_label "TEMP"} {temp_note_code ""} } {
     variable C
     variable L
 
@@ -1690,16 +2105,23 @@ proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} } {
 
     set i 0
     foreach {label code colour} [list \
-        [translate "PRESSURE"] {[pressure_text]}              $C(c_press) \
-        [translate "FLOW"]     {[waterflow_text]}             $C(c_flow) \
-        [translate "WEIGHT"]   {[::lumen::data::live_weight]} $C(c_weight) \
-        [translate "TEMP"]     $temp_code                     $C(c_temp) ] {
+        [translate "PRESSURE"]   {[pressure_text]}              $C(c_press) \
+        [translate "FLOW"]       {[waterflow_text]}             $C(c_flow) \
+        [translate "WEIGHT"]     {[::lumen::data::live_weight]} $C(c_weight) \
+        [translate $temp_label]  $temp_code                     $C(c_temp) ] {
         set cx [expr {$px + $i * $cw}]
         txt $page $cx [expr {$panel_y + 30}] $label \
             -font $L(font_label) -fill $C(ink_3)
         var $page $cx [expr {$panel_y + 66}] $code \
             -font $L(font_metric) -fill $colour
         incr i
+    }
+
+    # Optional caption under the temperature value (the steam page states
+    # its set point there, so the heater reading reads as intentional).
+    if { $temp_note_code ne "" } {
+        var $page [expr {$px + 3 * $cw}] [expr {$panel_y + 112}] \
+            $temp_note_code -font $L(font_caption) -fill $C(ink_3)
     }
 
     txt $page $L(center_x) $hint_y \
@@ -1720,50 +2142,101 @@ proc ::lumen::build_settings {} {
     variable L
     set p "lumen_settings"
 
-    txt $p $L(center_x) 44 [translate "Lumen"] \
+    txt $p $L(center_x) 24 [translate "Lumen"] \
         -font $L(font_title) -fill $C(ink) -anchor n -justify center
-    var $p $L(center_x) 92 {[::lumen::data::version_line]} \
+    var $p $L(center_x) 72 {[::lumen::data::version_line]} \
         -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
 
-    set rx 170 ; set rw 1000 ; set rh 118
-    set bw 150 ; set bh 56
-    set ry 150
+    ####################################################################
+    #  Left column: machine adjustments, the same -/+ stepper groups as
+    #  the home strip (owner request, mirroring Streamline's settings
+    #  column). Value sits between the pills; changes are saved and sent
+    #  to the machine, debounced by a second.
+    #
+    #  Column geometry: left 170..630 (460 wide), right 670..1170 (500
+    #  wide) -- 170 clear on BOTH page edges, one 16 gap between rows.
+    ####################################################################
+    set rx 170 ; set rw 460 ; set rh 118 ; set ry 110
+    set sw 44 ; set sg 8 ; set svw 100 ; set sh 48
 
-    foreach { label note code btn_label accent } [list \
-        [translate "THEME"]      {[::lumen::data::theme_note]} \
-            {::lumen::act::toggle_theme}    {[::lumen::data::theme_label]}     1 \
-        [translate "CHART LINES"] {[::lumen::data::smoothing_note]} \
-            {::lumen::act::toggle_smoothing} {[::lumen::data::smoothing_label]} 1 \
-    ] {
+    foreach {label notecode valcode minus_code plus_code what} [list \
+        [translate "BREW"] "" {[::lumen::data::brew_temp_value]} \
+            {::lumen::act::adjust_brew_temp -0.5} {::lumen::act::adjust_brew_temp 0.5} "Brew" \
+        [translate "STEAM"] {[::lumen::data::steam_flow_note]} {[::lumen::data::steam_time_value]} \
+            {::lumen::act::adjust_steam_time -5} {::lumen::act::adjust_steam_time 5} "Steam" \
+        [translate "FLUSH"] "" {[::lumen::data::flush_time_value]} \
+            {::lumen::act::adjust_flush_time -1} {::lumen::act::adjust_flush_time 1} "Flush" \
+        [translate "HOT WATER"] {[::lumen::data::water_temp_note]} {[::lumen::data::water_volume_value]} \
+            {::lumen::act::adjust_water_volume -10} {::lumen::act::adjust_water_volume 10} "Hot water" ] {
+
         glass $p $rx $ry $rw $rh
         txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] $label \
             -font $L(font_label) -fill $C(ink_3)
-        var $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] $note \
-            -font $L(font_caption) -fill $C(ink_2) -width 700
+        if { $notecode ne "" } {
+            var $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] $notecode \
+                -font $L(font_caption) -fill $C(ink_2)
+        }
 
-        set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
-        set by [expr {$ry + ($rh - $bh) / 2}]
-        glass $p $bx $by $bw $bh -radius $L(radius_sm) \
-            -fill $C(crema_lo) -outline $C(crema_brd)
-        var $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] $btn_label \
-            -font $L(font_button) -fill $C(crema) -anchor center -justify center
-        tap $p $bx $by $bw $bh $code $label
+        # [-] value [+], right-aligned in the row.
+        set gx [expr {$rx + $rw - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
+        set gy [expr {$ry + ($rh - $sh) / 2}]
+        set gmid_y [expr {$gy + $sh / 2.0}]
+        foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
+                glyph [list "-" "+"] scode [list $minus_code $plus_code] \
+                lbl [list "$what down" "$what up"] {
+            glass $p $sx $gy $sw $sh -radius $L(radius_sm) -spec 0
+            txt $p [expr {$sx + $sw / 2.0}] $gmid_y $glyph \
+                -font $L(font_section) -fill $C(crema) \
+                -anchor center -justify center
+            tap $p $sx $gy $sw $sh $scode $lbl
+        }
+        var $p [expr {$gx + $sw + $sg + $svw / 2.0}] $gmid_y $valcode \
+            -font $L(font_data) -fill $C(ink) -anchor center -justify center
 
         set ry [expr {$ry + $rh + $L(md)}]
     }
 
-    # Stock DE1app settings, one tap further in.
+    ####################################################################
+    #  Right column: theme and the stock settings. No Chart lines row --
+    #  the chart's own Stages / Raw pills already cover that (owner note).
+    ####################################################################
+    set rx 670 ; set rw 500 ; set rh 118
+    set ry 110
+
+    # THEME. The button deliberately is NOT accent-coloured: it is plain
+    # glass, so it renders dark in the dark theme and light in the light
+    # theme -- the button itself shows the theme (owner request).
+    set bw 150 ; set bh 56
+    glass $p $rx $ry $rw $rh
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "THEME"] \
+        -font $L(font_label) -fill $C(ink_3)
+    var $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
+        {[::lumen::data::theme_note]} \
+        -font $L(font_caption) -fill $C(ink_2) -width 290
+    set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
+    set by [expr {$ry + ($rh - $bh) / 2}]
+    glass $p $bx $by $bw $bh -radius $L(radius_sm) -fill $C(glass_2)
+    var $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
+        {[::lumen::data::theme_label]} \
+        -font $L(font_button) -fill $C(ink) -anchor center -justify center
+    tap $p $bx $by $bw $bh {::lumen::act::toggle_theme} "Theme"
+
+    # DECENT APP, with a bigger accent button (owner request) -- this is
+    # the door to everything else, so it earns the emphasis.
+    set ry [expr {$ry + $rh + $L(md)}]
+    set bw 200 ; set bh 64
     glass $p $rx $ry $rw $rh
     txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "DECENT APP"] \
         -font $L(font_label) -fill $C(ink_3)
     txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
         [translate "Machine, profiles, plugins, firmware and everything else."] \
-        -font $L(font_caption) -fill $C(ink_2) -width 700
+        -font $L(font_caption) -fill $C(ink_2) -width 240
     set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
     set by [expr {$ry + ($rh - $bh) / 2}]
-    glass $p $bx $by $bw $bh -radius $L(radius_sm) -spec 0
+    glass $p $bx $by $bw $bh -radius $L(radius_sm) \
+        -fill $C(crema_lo) -outline $C(crema_brd)
     txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
-        [translate "Open"] -font $L(font_button) -fill $C(ink_2) \
+        [translate "Open"] -font $L(font_button) -fill $C(crema) \
         -anchor center -justify center
     tap $p $bx $by $bw $bh {::lumen::act::open_app_settings} "App settings"
 
@@ -1784,7 +2257,12 @@ proc ::lumen::build_settings {} {
 ::lumen::build_flow_page espresso      {[::lumen::data::espresso_secs]} {[watertemp_text]} 1
 ::lumen::build_flow_page hotwaterrinse {[::lumen::data::espresso_secs]} {[watertemp_text]}
 ::lumen::build_flow_page water         {[::lumen::data::espresso_secs]} {[watertemp_text]}
-::lumen::build_flow_page steam         {[::lumen::data::steam_secs]}    {[steamtemp_text]}
+# The steam column shows the STEAM HEATER sensor (the only steam-side sensor
+# the machine has), labelled as such and with the set point stated under it.
+# Shown as a bare "TEMP" it read as a wrong value -- 158C with the heater
+# set to 160 is the heater at its set point, not a misreading.
+::lumen::build_flow_page steam         {[::lumen::data::steam_secs]}    {[steamtemp_text 1]} 0 \
+    "STEAM HEATER" {[::lumen::data::steam_target_note]}
 
 #############################################################################
 #  DYE integration
