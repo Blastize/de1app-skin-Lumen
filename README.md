@@ -115,9 +115,9 @@ page and Lumen will appear.
 ## What it looks like
 
 Tk has no runtime backdrop blur and canvas shapes have no alpha channel, so
-the frosted panels are composited offline by `tools/make_backgrounds.py`
-(Python + Pillow) into background PNGs — real translucency, blurred
-backdrops, soft shadows and specular edges.
+the frosted panels are composited offline into background PNGs — real
+translucency, blurred backdrops, soft shadows and specular edges — and the
+skin draws only text, the chart widget and tap targets on top.
 
 As of 0.20.0 **every** page is baked, not just home. Four images cover the
 five pages:
@@ -133,8 +133,10 @@ The three roomy flow pages share one image because `build_flow_page` draws
 identical panels for all three — only the label text differs, and text is not
 baked.
 
-Any layout change on any of those pages means re-running the generator; its
-coordinates mirror `::lumen::_init_layout` and `::lumen::build_settings`.
+The images are pre-rendered, so their panel coordinates mirror
+`::lumen::_init_layout` and `::lumen::build_settings` exactly — change a
+layout token and the background has to be re-rendered to match, or the text
+will sit off its panel.
 
 ## Themes
 
@@ -195,8 +197,7 @@ the process that is exiting. Changing skin in the stock settings behaves the
 same way. The CHANGELOG entry for 0.15.0 has the measurements.
 
 Both themes ship baked backgrounds for every page
-(`1340x800/lumen_*[_light].png`, `2560x1600/...`), regenerated together by
-`tools/make_backgrounds.py`.
+(`1340x800/lumen_*[_light].png`, `2560x1600/...`).
 
 ## Layout basis
 
