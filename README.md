@@ -7,13 +7,15 @@ recommendation, the last shot, the shot graph, and the beans for the next
 shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor and SDB.
 
-**Version 0.18.0 — home dashboard, shot chart and flow pages all built and
-running on the tablet.** 0.18.0 removes the Espresso/Steam/Water/Flush rail
-(the machine's GHC covers those), widens every tile to full width, adds
-**− value + steppers** for grind, dose, yield and ratio to the next-shot
-strip, a **Shot history** shortcut to the Last shot tile, and relabels the
-steam page's temperature as **STEAM HEATER** with its set point stated
-beneath it.
+**Version 0.23.2 — every page built, baked and running on the tablet.**
+
+Since 0.18.0: every page uses a pre-rendered frosted background rather than
+just the home screen; the next-shot strip gained a **bag cycler** that steps
+through your recently used beans; both cards show the **profile** the shot
+uses, because a profile change now starts a fresh grind calibration; and the
+bean's **tasting notes** sit under its name. The grind tile follows the bag
+you cycle to, showing that bag's own recommendation rather than the last one
+you happened to pull.
 
 ## The home screen
 
@@ -29,17 +31,23 @@ backdrop and let the shadow do the separating.
 
 | Tile | Shows | Tap |
 |---|---|---|
-| Grind | GrindAdvisor's next setting, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's result popup |
+| Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
-| Last shot | Dose, yield, time, ratio | — |
-| Graph | Pressure, flow, cumulative weight and basket temperature for the shot, plus dashed stage separators at every frame change | **Stages** and **Raw / Smooth** toggles in its header |
-| Next shot | Bean, roast date, grind, dose, target yield, ratio | Opens DYE's next-shot editor |
-| − value + steppers | GRIND, DOSE, YIELD, RATIO — the live value sits between the pills | Slow tap ±0.1; quick taps on grind/dose/yield escalate to ±0.5 then ±1.0 |
+| Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time | — |
 | Shot history (Last shot tile) | — | Opens the Shot History Editor (edit / soft-delete past shots) |
+| Graph | Pressure, flow, cumulative weight and basket temperature for the shot, plus dashed stage separators at every frame change | **Stages** and **Raw / Smooth** toggles in its header |
+| Next shot | The profile, the roaster, the bean, and its tasting notes | — |
+| ◀ ▶ (next-shot card) | The bag being cycled | Steps through your recently used beans |
+| Edit | — | Opens DYE's next-shot editor |
+| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Slow tap ±0.1; quick taps escalate to ±0.5 then ±1.0 |
 | Scale readout | Live weight, or `Connecting` / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
-| Scan bag / Edit | Bottom row of the next-shot strip | Bean Scanner, DYE editor |
+| Scan bag | — | Bean Scanner |
 | Settings / Sleep | Their own side panel, right of the strip | Lumen settings, sleep |
+
+The bag cycler reads your recent beans through SDB's public API and applies
+the chosen one through DYE, so the skin itself opens no database. How many
+bags it offers is set on the Lumen settings page (3–10, default 5).
 
 There are no Espresso/Steam/Water/Flush buttons — the machine's GHC starts
 those, and the flow pages take over the screen as soon as it does.
