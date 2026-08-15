@@ -1,5 +1,441 @@
 # Changelog — Lumen
 
+## 0.23.2 — water and flush pages read their own timers — TABLET-VERIFIED 2026-08-15
+
+Display only, no new writes.
+
+Owner reported the steam / water / flush pages "stuck at 0s", then that it
+worked. It did not: **water and flush were both reading `espresso_secs`**,
+which is
+
+```tcl
+([clock milliseconds] - $::timers(espresso_start)) / 1000
+```
+
+— time since the last **espresso** started, not the duration of the current
+flow. Right after a shot that produces a number that ticks up and looks
+correct, which is why it seemed fine on a retest; more than an hour after the
+last espresso it exceeds `_sane_secs`' 3600 ceiling and reads 0. That is the
+originally reported symptom. Steam was never affected because it was already
+wired to `steam_pour_timer`.
+
+The core provides one timer per flow and starts each on its own state's
+"during" phase (`de1app-core/binary.tcl:1509-1527`): `espresso_timer`,
+`steam_pour_timer`, `water_pour_timer`, `flush_pour_timer`. New
+`data::water_secs` and `data::flush_secs` use the right two.
+
+### Two harness defects this exposed
+
+**1. `espresso_timer` was never stubbed.** The accessors wrap the timer call
+in `catch`, so an unstubbed proc silently returned 0 and looked exactly like a
+working one. All four timers are stubbed now with *distinct* values.
+
+**2. The harness hardcoded an absolute path to the workspace `skin.tcl`.**
+Copying the harness elsewhere to test a modified skin silently re-ran against
+the original — so a regression test could "pass" without ever seeing the
+change it was meant to exercise. Three attempts at testing this fix were
+meaningless before it was spotted. The path is derived from `[info script]`
+now, and the harness prints which file it sourced.
+
+### The new check
+
+The first attempt asserted the four accessors return different values, which
+proves nothing about **which page uses which** — and the wiring was the bug.
+The check now inspects the recorded `dui add variable` calls per page (the
+stub keeps the page name for this) and asserts each flow page is wired to its
+own accessor. Verified by restoring the old wiring in a copy: it reports
+
+```
+*** water IS NOT WIRED TO water_secs ***
+*** hotwaterrinse IS NOT WIRED TO flush_secs ***
+```
+
+## 0.23.1 — strip rows levelled, even vertical rhythm — TABLET-VERIFIED 2026-08-15
+
+Display only. Two token values.
+
+The strip's bottom row (Connect / Set dose / Scan bag) sat 6px above the
+identity block's action row (arrows / Edit) and it showed. `scale_y` 716 ->
+**722**, which is `id_act_y`, so all six controls share one baseline and both
+columns end together at 770.
+
+The right column is now evenly distributed as well: content 594..770, items
+16 + 48 + 48 = 112, leaving 64 as **32 above the steppers and 32 below**
+(previously 35 and 24). `step_y` 644 -> **642**.
+
+Measured on the baked asset to confirm rather than eyeballed: the arrows,
+Edit, scale readout and Set dose all span y 722..769 at 48 tall, and the
+stepper pills span 642..689 — so both gaps are exactly 32.
+
+Three harness assertions added so these cannot drift again: the two rows must
+share a y, they must share a height, and the right column's two gaps must be
+equal.
+
+## 0.23.0 — re-proportioned home, bean details on both cards — NOT YET TABLET-VERIFIED
+
+**Safety status: no new writes and no new settings.** Layout and display only.
+
+Owner mockup. The two top cards were taller than their content needed while
+the next-shot card — the one you actually operate — was the most cramped.
+
+| | before | after |
+|---|---|---|
+| top cards | 16..252 (h 236) | **16..206 (h 190)** |
+| chart | 268..600 | **222..558 (h 336)** |
+| bottom row | 616..784 (h 168) | **574..784 (h 210)** |
+
+Every gap is still `md` (16) and the bottom margin is still 16.
+
+### Both cards read the same way
+
+`LABEL → PROFILE → roaster → bean type`, on the last-shot card and the
+next-shot card alike, so the two can be compared at a glance — which is the
+point, since a differing profile means Grind Advisor has started a fresh
+calibration.
+
+**The roaster is the small line and the bean type is the hero**, not the other
+way round. "MAN VERSUS MACHINE Specialty Coffee Roasters" is 44 characters and
+was being cut to 13; "Sure Shot" is what actually distinguishes bags on the
+counter and never truncates. The widened identity block (280 → 460) holds a
+46-character roaster in full.
+
+### Tasting notes
+
+`bean_notes` now appears on the next-shot card — the best-populated optional
+bean field (42% of shots; the current bag reads "Sweet, Creamy, Cocoa &
+Nuts"). Rendered only when non-empty, so a bag without notes leaves no gap.
+
+### Card details
+
+*Last shot* gained **GRIND** alongside dose/yield/time, with the derived ratio
+under YIELD exactly as the next-shot card does it. **Shot history** became a
+text link beside the Curve / Shot analysis styling — it was the only button on
+the card, which gave a history shortcut more weight than it deserves.
+
+*Next shot* — PROFILE left the stepper row for the identity block, so three
+stepper columns now span 520..1116 on a 210 pitch instead of four on 206.
+**Edit** moved onto the identity block's action row beside the cycler arrows,
+so the bag's controls sit with the bag.
+
+The identity block's full-height DYE tap is gone: with the arrows and Edit on
+its action row a block-wide tap would have overlapped them, and tap targets
+may never overlap. Edit is the single way in, which is clearer than a large
+invisible region that did the same thing.
+
+### C(chart_bg) changed to #151618 / #DEE0E5
+
+The generator's sample point is an **absolute page coordinate**, and the chart
+panel moved, so (700, 450) was no longer its centre. Corrected to (700, 390)
+and the palette updated to match — the graph is an opaque Tk widget and a
+stale value would read as a box cut into the panel. Worth remembering: this
+token must be re-sampled whenever the chart panel moves.
+
+### Four text bugs found on the tablet and fixed in the same version
+
+1. **The last shot's profile rendered inside the grind tile.** Its value was
+   drawn at `id_val_x` (130) — the *next-shot* card's coordinate — so it
+   landed in the neighbouring card and left LAST SHOT's own PROFILE label
+   with nothing beside it. It has its own `last_val_x` (796) now. Lesson: a
+   token named for one card must not be reused on another.
+2. **"Curve" fell out of the shortened grind tile.** The offsets were moved
+   from `gy + 170` to `gy + 140` with a replace-all that only matched the
+   occurrences starting a line; Curve's is inline after `$gcv_r` and kept the
+   old value, which now sits past the card's edge.
+3. **The last shot's bean name was cut to "Jorge Dia...".** 274px holds ~11
+   characters at the 40px hero. It uses `font_primary` (22px) and a 24-char
+   cap — which also matches the owner's mockup, where this name is smaller
+   than the next-shot one. This card is a summary; that one is the control.
+4. **Tasting notes ran through the cycler arrows and Edit.** `bean_notes` is
+   genuinely MULTI-LINE in real data — the Morgon bag holds "Peru | Washed |
+   Bourbon\nJuicy, Forest Berries, Cacao" — and the row budget assumed one
+   line. Newlines and whitespace runs now collapse to a single separated
+   line, capped to what the block holds. **The offline harness could not have
+   caught this: it has no way to know a data field contains a newline.**
+
+### Action row
+
+`[ < ] [ Edit ] [ > ]` across the identity block's full 460px, all 48 tall.
+The arrows were 40x34 and the owner reported them as tiny — well under the
+touch floor, and adjacent, so a mis-tap on one hit the other. Edit sits
+BETWEEN them (owner request), which separates them as well as filling the
+row. The harness now fails anything in this row under 44px.
+
+### Verified
+
+Harness clean in all three states, 40 tap targets with no overlap, and new
+budget checks for the identity rows (order, hero clear of the notes, block
+clear of the steppers, last-shot identity clear of the metrics, metrics inside
+the tile). Two harness checks were stale from the old layout — arrows-above-
+the-name and a PROFILE tile that no longer exists — and were rewritten to the
+new invariants rather than deleted. Image diff confirms only the four home
+images changed; settings and both flow images are byte-identical.
+
+## 0.22.0 — the grind tile follows the cycled bag — NOT YET TABLET-VERIFIED
+
+**Safety status: no new writes, no new settings, no asset change.** No layout
+change either, so nothing was re-baked.
+
+Owner-reported after 0.21.0: cycling a bag changed the bean fields but the
+Recommended Grind card kept its old number.
+
+Two causes, and the second was the real one:
+
+1. The recommendation saved on the tablet predated Grind Advisor 3.7.0 and
+   carried no `bag_key`, so `last_recommendation_is_current` hit its fail-safe
+   and reported "current". That alone would have cleared after one shot.
+2. **More importantly, blanking was the wrong design.** Even working
+   perfectly, 0.21.0 would only have emptied the tile. A bag you cycle back to
+   already has its own shots and its own regression, and discarding that is a
+   worse answer than showing it.
+
+`grind_rec` now calls Grind Advisor 3.8.0's
+`recommendation_for_current_bag`, which computes from the loaded bag's own
+history (memoized per bag, so the 200 ms refresh tick costs nothing) and
+prefers the saved recommendation whenever that already describes this bag.
+
+The older paths are kept behind `[info procs]` checks, in descending order of
+capability: 3.7.x can still report whether the saved rec is current, and
+3.6.x and earlier just hand over the last saved one — so the skin degrades
+cleanly instead of blanking the tile for anyone on an older plugin.
+
+A bag with no shots yet still shows the "pull a shot" note. The owner's
+"reset only, no seeded number" decision is untouched: nothing here invents a
+grind, it only surfaces numbers a bag's own shots already justify.
+
+## 0.21.0 — bag cycler, profile on the strip and the last-shot card — NOT YET TABLET-VERIFIED
+
+**Safety status: no new write class, and Lumen still opens no database.** The
+bag cycler reads through SDB's public API and writes through DYE's own
+`::plugins::DYE::shots::source_next_from` — the same path Bean Scanner uses.
+Lumen issues no SQL and holds no database handle. No file in `history/` or
+`history_v2/` is read, written, renamed or deleted.
+
+### Bag cycler
+
+Two arrows on the NEXT SHOT label row step the next shot's bean bag through
+the most recently used bags. Depth comes from `::settings(lumen_bag_count)`
+(the BAGS TO CYCLE row added in 0.20.0, default 5).
+
+They sit **just after the NEXT SHOT label**, not right-aligned to the identity
+block. Right-aligned was the first build and it was wrong on the tablet: the
+block ends at 320 and the GRIND column starts at exactly 320, so the arrows
+touched it with zero gap and read as GRIND's controls rather than the bag's.
+The harness now asserts at least `md` (16) between the two — it is 84.
+
+* list — `::plugins::SDB::available_categories bean_desc 1 {} 0`. That
+  trailing `0` is `use_lookup_table` and it earns its place three times: it
+  selects the branch ordering by `MAX(shot.clock) DESC` (most recently used
+  bag first, which is the entire point), it is the only branch that applies
+  the `removed=0` filter, and it avoids the lookup-table branch, which reads
+  an undefined `lookup_order_by` (`SDB.tcl:2723`; its assignment is commented
+  out at 2657).
+* clock — `::plugins::SDB::shots_using_category bean_desc <value> t.clock`,
+  newest first. **The `t.` qualifier works around an SDB defect, found on the
+  tablet.** For `bean_desc` the data dictionary gives `db_table = V_shot`
+  rather than `shot`, so `shots_using_category` takes its aliased branch and
+  builds `SELECT DISTINCT clock FROM V_shot t INNER JOIN V_shot s ON
+  t.clock=s.clock` — a bare `clock` that SQLite rejects with *"ambiguous
+  column name: clock"*, and the cycler could never resolve a clock.
+  `act::_bag_clocks` tries the qualified spelling first and the bare one
+  second (correct if a future SDB maps `bean_desc` onto the plain `shot`
+  table), and returns nothing rather than throwing if both fail.
+
+  The first offline stub accepted `clock` happily, which is exactly why this
+  reached the tablet. The stub now reproduces the ambiguity, and the SQL was
+  re-verified against the real database: `clock` fails, `t.clock` returns all
+  13 clocks for the test bag, and all 7 bags resolve.
+* apply — `::plugins::DYE::shots::source_next_from <clock> {} beans`. DYE
+  expands `beans` through `metadata fields -domain shot -section beans`, so
+  the whole bean section travels: brand, type, roast date, level, notes.
+
+A bag not in the window (hand-typed, or older than the last N) steps onto the
+most recent bag rather than doing nothing. Blank `bean_desc` values are
+dropped so cycling can never land on "no bag". Missing SDB or DYE logs and
+does nothing instead of throwing inside a button handler.
+
+### PROFILE replaces the RATIO stepper
+
+The strip's four columns are full: 176px each on a 206 pitch from x=320,
+ending at 1114 against a 1116 inner edge. A fifth column would have forced
+every control down to ~143px and the value span to ~43px, which will not hold
+"1:2.0". So RATIO gave up its slot.
+
+Nothing is lost. Ratio was never independent — its stepper only ever wrote
+`final_desired_shot_weight`, exactly as the yield stepper does. It is now a
+derived caption **under** the yield value, in the owner-supplied style
+("36g" with "(1:2.4)" beneath). It stacks *inside* the 662..710 pill band, not
+below it: the strip's bottom row starts at 722 and 12px is not a line of text.
+`::lumen::act::adjust_ratio` is deleted.
+
+The freed column (x=938) is a read-only PROFILE tile. Read-only on purpose —
+profiles are chosen in the app's own picker, and a stepper over a list of
+profiles is a different feature. It belongs on the strip because a profile
+change now starts a fresh calibration (Grind Advisor 3.7.0).
+
+### Profile on the last-shot card
+
+The LAST SHOT tile names the profile that shot actually ran on.
+
+Deliberately **not** `::settings(profile_title)`: that is the profile loaded
+right now, and it stops describing the last shot the moment you switch — which
+is precisely the case this line exists to show. `::lumen::last_shot_profile`
+is latched when the espresso page opens (a shot is starting, so the loaded
+profile is the one it will use) and seeded at startup from the newest history
+file, which `load_last_shot_curves` already parses.
+
+Latching on flow *complete* would have been subtly wrong: `after_flow_complete`
+fires for steam, hot water and flush too, any of which can land after you have
+already switched profiles for the next coffee.
+
+The seed reads the shot file's `settings` block into a **local** array. Never
+`array set ::settings $props(settings)` — that is the stock `preview_history`
+behaviour and it would replace your entire live configuration with a stale one.
+
+### The grind tile resets on a bag or profile change
+
+Every grind accessor funnels through `::lumen::data::grind_rec`, so one guard
+there resets the tile coherently: hero to "--", delta, method chip and
+confidence band blank, and the note explains why.
+
+Before this, switching bags left the **previous** bag's recommendation on
+screen until the next shot was pulled — a calibration for a different coffee,
+presented as if it were current.
+
+Uses Grind Advisor 3.7.0's `last_recommendation_is_current`, which fails safe
+on its own side. The `[info procs]` guard here is for **older** Grind Advisor
+builds where the proc does not exist: those behave exactly as 0.20.0 did
+rather than blanking the tile for everyone still on 3.6.x.
+
+### Tap target carve
+
+The cycler arrows sit inside the identity block's DYE tap, and two tap targets
+may never overlap. The DYE target now starts below the arrows — the same carve
+the grind tile does around its Curve control. What is given up is the label
+strip; the bean name and sub-line, which is what anyone actually aims at, stay
+tappable. The harness caught this: it reported two overlaps on the home page
+on the first run.
+
+### Assets and harness
+
+Home re-baked: the RATIO pills are gone and the two cycler pills are in.
+**Verified by image diff that only the four home images changed** — settings
+and both flow images are byte-identical, and the change is confined to the
+strip (design-px bbox 219,614–1131,735). Palette tokens unchanged.
+
+Harness gained a cycler/profile budget block (arrows inside the identity
+block, arrows clear of the bean name, profile tile inside the strip, pill band
+clear of the bottom row).
+
+Verified offline: harness clean in all three states with no warnings; the new
+procs byte-compile; the cycler's index arithmetic tested for wrap-around in
+both directions, a bag outside the window, an empty list, an all-blank list, a
+single bag, a bag with no shots, and both plugins missing.
+
+## 0.20.0 — every page baked; settings right column filled — TABLET-VERIFIED 2026-08-15
+
+Verified on the tablet: the settings page renders with its baked background,
+all four right-column rows present, Done returns to a correct home page, and
+the log reads `Lumen skin v0.20.0 loaded (dark)` with no missing-image
+warnings. **The four flow pages (espresso / steam / water / flush) were
+confirmed by the owner on 2026-08-15**, which also validates
+`C(chart_bg_flow)` — the separate token for the espresso page's chart panel,
+the one value in this work that could not be tested off-device.
+
+**Safety status: one new setting, no new write class.**
+`::settings(lumen_bag_count)` (3–10, default 5) is written only on an
+explicit stepper tap and saved with plain `save_settings` — it is a skin
+preference and deliberately never goes near `save_settings_to_de1`. No
+database is opened; no file in `history/` or `history_v2/` is read, written,
+renamed or deleted. Everything else in this version is display-only.
+
+### The settings and flow pages no longer look a generation behind
+
+Only the home page was baked. Everything else fell through to the vector
+`glass` primitive, which Tk cannot make translucent: flat fills, a hard
+1px line along the **top edge only**, no shadow, no gradient, and a flat
+brown-ish accent instead of the crema bloom. Side by side with home the
+difference is not subtle.
+
+Faking depth with stacked canvas shapes was tried in 0.6.0 and reverted — on
+a near-black ground the shadow tones span about two RGB values. So the fix is
+the proven mechanism: bake them.
+
+`tools/make_home_bg.py` is now `tools/make_backgrounds.py`, generalized from
+one hardcoded page to a `PAGES` table. Four images cover five pages:
+
+| Image | Page |
+|---|---|
+| `lumen_home` | home (`off`) |
+| `lumen_settings` | Lumen settings |
+| `lumen_flow_chart` | espresso (compact layout, live chart) |
+| `lumen_flow` | steam, water, hotwaterrinse |
+
+The three roomy flow pages share one image: `build_flow_page` draws identical
+panels for all three and only the label text differs, and text is not baked.
+That is why this is 4 images and not 5. Assets grew by ~1.1 MB.
+
+**The home backgrounds regenerate BYTE-identical** to the committed ones —
+same SHA256 and same byte length across both themes and both resolutions, on
+top of a pixel-level image diff. The refactor is proven non-destructive.
+
+`::lumen::baked_pages` now lists all five pages, so `glass` no-ops on them,
+and each page is registered with its own `-bg_img` instead of `-bg_color`.
+
+### C(chart_bg_flow)
+
+New palette token. The espresso page's chart panel sits at y 186..504 while
+the home one sits at 268..600, and the backdrop is a vertical gradient — so
+the correct tone at those two heights genuinely differs (`#171719` vs
+`#141517` on dark). A BLT graph is an opaque Tk widget that takes exactly one
+background colour, so sharing a single token would have read as a box cut
+into the espresso panel. The generator prints both.
+
+### Settings page right column
+
+The column stopped after DECENT APP and left ~440px empty against four rows
+on the left. It now runs four rows like the left one, both ending at y=630
+with 60 clear above Done:
+
+* **BAGS TO CYCLE** — how many recent bean bags the home strip's cycler
+  offers, 3–10, default 5. **This version ships the preference and its row
+  only; the cycler that consumes it lands in 0.21.0.** The row has to exist
+  now because the page background is baked, and a baked page cannot grow a
+  row later without regenerating every asset.
+* **GRIND ADVISOR** — opens the plugin's settings via its public
+  `open_settings_dialog`, guarded exactly like the existing Shot History
+  shortcut. Grind Advisor's own page captures the page it was opened from
+  (v1.8.8), so Done returns here with no bookkeeping in Lumen. Drawn with the
+  raised fill rather than the accent one: DECENT APP is the single emphasised
+  door on this page and two accent buttons in one column compete.
+
+The THEME button is baked with the **raised** fill to match what
+`build_settings` actually draws (`-fill $C(glass_2)`); a first pass baked it
+plain and it would have rendered flatter than the code intended. Still not
+accent-coloured, per the 0.18.0 requirement that the button itself show the
+theme.
+
+The `-` / `+` stepper glyphs stay ASCII. The `-` does render lighter than the
+`+`, but ASCII-only is a recorded design rule and this is a restyle pass, not
+the place to overturn it.
+
+### Harness
+
+`tools/check_skin.tcl` gained a settings-page budget check (row spacing, both
+columns' clearance to their steppers, Done clearance, page-edge symmetry) and
+a baked-background check that every page in `baked_pages` has an image on
+disk for both themes at both resolutions — a declared page with no background
+renders blank, which was the very first tablet test's failure mode.
+
+The column-clearance check found a bug in itself on the first run: it applied
+the right column's `-width 220` caption bound to the left column too, which
+draws bare short labels with no `-width` at all, and reported a phantom
+12px overlap. The bound is now per column.
+
+Verified offline: harness clean in all three states with no warnings; the
+four new procs byte-compile; `bag_count` clamps correctly for empty,
+negative, non-numeric, float and out-of-range input; `open_grind_advisor`
+logs rather than throws when the plugin is absent.
+
 ## 0.19.0 — tap-rate acceleration on the grind / dose / yield steppers — TABLET-VERIFIED 2026-08-14
 
 **Safety status: no new settings and no new writes.** Same fields as 0.18.0,

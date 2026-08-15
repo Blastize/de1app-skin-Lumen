@@ -115,24 +115,71 @@ page and Lumen will appear.
 ## What it looks like
 
 Tk has no runtime backdrop blur and canvas shapes have no alpha channel, so
-the home page's frosted panels are composited offline by
-`tools/make_home_bg.py` (Python + Pillow) into one background PNG per theme
-and resolution — real translucency, blurred backdrops, soft shadows and
-specular edges. Any home layout change means re-running the generator; its
-coordinates mirror `::lumen::_init_layout`. The flow and settings pages are
-still pure vector: rounded panels drawn with canvas primitives, each
-"translucent" tone pre-composited against the background colour by hand.
+the frosted panels are composited offline by `tools/make_backgrounds.py`
+(Python + Pillow) into background PNGs — real translucency, blurred
+backdrops, soft shadows and specular edges.
+
+As of 0.20.0 **every** page is baked, not just home. Four images cover the
+five pages:
+
+| Image | Page |
+|---|---|
+| `lumen_home` | home (`off`) |
+| `lumen_settings` | Lumen settings |
+| `lumen_flow_chart` | espresso (compact layout, live chart) |
+| `lumen_flow` | steam, water, hotwaterrinse |
+
+The three roomy flow pages share one image because `build_flow_page` draws
+identical panels for all three — only the label text differs, and text is not
+baked.
+
+Any layout change on any of those pages means re-running the generator; its
+coordinates mirror `::lumen::_init_layout` and `::lumen::build_settings`.
 
 ## Themes
 
 Dark and light are both defined. The mode is read once at load from
 `::settings(lumen_theme)` (`dark` or `light`); it defaults to dark.
 
-The Lumen settings page also carries the **machine column**: Brew
+The Lumen settings page carries the **machine column** on the left: Brew
 temperature (±0.5°C), Steam time (±5 s, steam flow shown beneath), Flush
 time (±1 s) and Hot Water volume (±10 ml, temperature shown beneath), each
 with the same − value + steppers as the home strip. Changes are saved and
 sent to the machine automatically, one second after the last tap.
+
+The right column holds **THEME**, **DECENT APP** (the door to the stock
+settings, profiles, plugins and firmware), **BAGS TO CYCLE** and **GRIND
+ADVISOR**.
+
+*Bags to cycle* (3–10, default 5) sets how many recent bean bags the home
+strip's bag cycler offers. It is stored in `::settings(lumen_bag_count)` and
+is a Lumen preference only — it never reaches the machine.
+
+## The next-shot strip
+
+`NEXT SHOT` names the bag, with **◀ ▶** arrows that cycle it through the most
+recently used bags (as many as *Bags to cycle* allows). A bag not in that
+window steps onto the most recent one. Tapping the bag name still opens DYE.
+
+Then **GRIND**, **DOSE**, **YIELD** and **PROFILE**. Ratio is shown as a
+derived caption under the yield value rather than a stepper of its own: it was
+never independent — stepping it only ever wrote the target yield — and the
+column was needed for the profile, which now scopes calibration (Grind Advisor
+3.7.0 starts a fresh calibration when the profile changes).
+
+The profile tile is read-only; profiles are chosen in the app's own picker.
+
+The **LAST SHOT** card names the profile that shot ran on, which is not
+necessarily the one loaded now — when the two differ, Grind Advisor has
+started a fresh calibration.
+
+Nothing in the cycler touches the database directly: the bag list and shot
+clock come from SDB's public read API, and the write goes through DYE's own
+`source_next_from`, the same path Bean Scanner uses.
+
+*Grind Advisor* opens that plugin's settings through its public
+`open_settings_dialog`; the plugin's own page captures where it was opened
+from, so **Done** comes straight back here.
 
 The **THEME** row on the Lumen settings page toggles it. Because the palette
 is read once at load and every canvas item is created from it, the change
@@ -147,9 +194,9 @@ is rejected by the platform, and `borg activity` would start the activity in
 the process that is exiting. Changing skin in the stock settings behaves the
 same way. The CHANGELOG entry for 0.15.0 has the measurements.
 
-Both themes ship a baked home-page background
-(`1340x800/lumen_home[_light].png`, `2560x1600/...`), regenerated together by
-`tools/make_home_bg.py`.
+Both themes ship baked backgrounds for every page
+(`1340x800/lumen_*[_light].png`, `2560x1600/...`), regenerated together by
+`tools/make_backgrounds.py`.
 
 ## Layout basis
 
