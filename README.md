@@ -7,7 +7,22 @@ recommendation, the last shot, the shot graph, and the beans for the next
 shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor and SDB.
 
-**Version 0.23.2 — every page built, baked and running on the tablet.**
+**Version 0.30.0 — every page built, baked and running on the tablet.**
+
+0.28.0: the home page follows Shot History Editor changes — edit or delete a
+shot there and the chart, the LAST SHOT card and the bag cycler reload from
+what `history/` now holds, via `::lumen::refresh_after_history_change`
+(called by ShotHistoryEditor v0.7.0; other skins are unaffected).
+
+0.24.0 adds the **water tank level** in millilitres to the home screen, a
+**Profile** shortcut beside Settings and Sleep, moves **DECENT APP** to the
+bottom-right card of the Lumen settings page, and fixes the flow-page timers
+flashing the *previous* flow's elapsed time for a moment when a page opens.
+0.24.1 makes the last shot's **yield** survive an app restart — it is read
+back from the shot file — and show `--` rather than `0.0` when the shot was
+pulled without a scale. 0.25.0 extends that to **grind and dose**: the LAST
+SHOT card reports what the shot itself recorded, so a correction made in the
+Shot History Editor shows up there.
 
 Since 0.18.0: every page uses a pre-rendered frosted background rather than
 just the home screen; the next-shot strip gained a **bag cycler** that steps
@@ -33,17 +48,18 @@ backdrop and let the shadow do the separating.
 |---|---|---|
 | Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
-| Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time | — |
+| Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time — as **that shot recorded them**, read back from the shot file, so corrections made in the Shot History Editor appear here. `--` when the shot had no weight | — |
+| Water (Last shot tile, top right) | Water left in the tank, in mL, in blue. Blank when no machine is connected | — |
 | Shot history (Last shot tile) | — | Opens the Shot History Editor (edit / soft-delete past shots) |
 | Graph | Pressure, flow, cumulative weight and basket temperature for the shot, plus dashed stage separators at every frame change | **Stages** and **Raw / Smooth** toggles in its header |
 | Next shot | The profile, the roaster, the bean, and its tasting notes | — |
-| ◀ ▶ (next-shot card) | The bag being cycled | Steps through your recently used beans |
+| ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
-| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Slow tap ±0.1; quick taps escalate to ±0.5 then ±1.0 |
+| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap ±0.1; drumming rapidly (3+ taps a second) escalates to ±0.5 then ±1.0. Any measured pace stays at ±0.1 (0.28.1) |
 | Scale readout | Live weight, or `Connecting` / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
 | Scan bag | — | Bean Scanner |
-| Settings / Sleep | Their own side panel, right of the strip | Lumen settings, sleep |
+| Profile / Settings / Sleep | Their own side panel, right of the strip | The app's profile list, Lumen settings, sleep |
 
 The bag cycler reads your recent beans through SDB's public API and applies
 the chosen one through DYE, so the skin itself opens no database. How many
@@ -70,6 +86,11 @@ Espresso, steam, water and flush each get their own page: what the machine is
 doing, a large elapsed timer, and live pressure / flow / weight / temperature.
 Tap anywhere to stop — including on flush, which the stock skin does not offer.
 
+Each page reads its own timer, and only reports the flow **this** page visit
+is running. The machine's timers keep describing the previous flow until the
+new one starts pouring, and the page opens before that — which is why the
+espresso page used to flash the seconds since the last shot began (0.24.0).
+
 The steam page's temperature column is labelled **STEAM HEATER**, because
 that is what the machine reports there: the steam heater sensor
 (`ShotSample(SteamTemp)`), which idles at the steam set point — about 158°C
@@ -84,6 +105,13 @@ silently. Look for `Lumen:` in the log if a button seems dead.
 Dose and grinder setting persist across shots in the DE1app, so "last shot"
 and "next shot" show the same figures until you change them. That is the
 app's own behaviour, not a quirk of the skin.
+
+The two cards do answer different questions, though, and 0.25.0 made that
+real: **LAST SHOT is the record** — grind, dose and yield as the shot file
+holds them, corrections included — while **NEXT SHOT is the plan**, the live
+and DYE-staged values the next shot will use. The card falls back to the live
+settings once a shot has run in this session, because those are exactly what
+that shot recorded.
 
 ## Typography
 
@@ -152,14 +180,25 @@ Dark and light are both defined. The mode is read once at load from
 `::settings(lumen_theme)` (`dark` or `light`); it defaults to dark.
 
 The Lumen settings page carries the **machine column** on the left: Brew
-temperature (±0.5°C), Steam time (±5 s, steam flow shown beneath), Flush
-time (±1 s) and Hot Water volume (±10 ml, temperature shown beneath), each
-with the same − value + steppers as the home strip. Changes are saved and
-sent to the machine automatically, one second after the last tap.
+temperature (±0.5°C), Steam, Flush time (±1 s) and Hot Water, each with the
+same − value + steppers as the home strip. Changes are saved and sent to the
+machine automatically, one second after the last tap.
 
-The right column holds **THEME**, **DECENT APP** (the door to the stock
-settings, profiles, plugins and firmware), **BAGS TO CYCLE** and **GRIND
-ADVISOR**.
+**Steam and Hot Water each carry two settings** (0.26.0). Tap the mode line
+under the row's label to choose which one the − / + pills drive:
+
+| Row | Modes | Step |
+|---|---|---|
+| Steam | **TIME** (`steam_timeout`) / **FLOW** (`steam_flow`) | ±5 s / ±0.1 mL/s |
+| Hot Water | **TEMP** (`water_temperature`) / **VOL** (`water_volume`) | ±1 °C / ±10 ml |
+
+The selected setting is the large value between the pills; the other sits
+small beneath it, so both are always readable. The choice persists — whichever
+half you last steered is the one waiting next time.
+
+The right column runs **THEME**, **BAGS TO CYCLE**, **GRIND ADVISOR** and then
+**DECENT APP** — the door to the stock settings, profiles, plugins and
+firmware — as the bottom-right card.
 
 *Bags to cycle* (3–10, default 5) sets how many recent bean bags the home
 strip's bag cycler offers. It is stored in `::settings(lumen_bag_count)` and
@@ -177,7 +216,9 @@ never independent — stepping it only ever wrote the target yield — and the
 column was needed for the profile, which now scopes calibration (Grind Advisor
 3.7.0 starts a fresh calibration when the profile changes).
 
-The profile tile is read-only; profiles are chosen in the app's own picker.
+The profile tile is read-only; profiles are chosen in the app's own picker,
+which the side panel's **Profile** button opens directly (`show_settings
+settings_1`, the stock profile tab).
 
 The **LAST SHOT** card names the profile that shot ran on, which is not
 necessarily the one loaded now — when the two differ, Grind Advisor has

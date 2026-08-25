@@ -5,10 +5,21 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.23.2  (water and flush pages read their own timers)
+#  Version: 0.30.0  (chart follows the bag cycler; flash ring hugs the control)
 #
-#  SAFETY STATUS: no database is opened, and no file in history/ or
-#  history_v2/ is read, written, renamed or deleted.
+#
+#
+#  SAFETY STATUS: no database is opened. Nothing in history/ or history_v2/
+#  is written, renamed or deleted -- ever, in any version.
+#
+#  READ access is limited to ONE file: load_last_shot_curves opens the newest
+#  history/*.shot at startup, for the chart vectors, the profile name and what
+#  that shot was pulled with. It parses into a LOCAL array; the stock
+#  preview_history does `array set ::settings $props(settings)`, which would
+#  overwrite the live configuration with a stale one.
+#
+#  (Before 0.25.0 this block claimed nothing in history/ was read at all.
+#  That was already untrue -- the curve loader has been there since 0.9.0.)
 #
 #  Every ::settings write happens only on an explicit tap, and every stepper
 #  clamps its value so a runaway tap cannot write junk.
@@ -74,7 +85,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.23.2"
+    variable version "0.30.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -113,8 +124,48 @@ namespace eval ::lumen {
     # the case this line exists to show.
     variable last_shot_profile ""
 
+    # What the newest shot FILE records: grind, dose and yield, read out of
+    # its settings block by load_last_shot_curves at startup. Keys grind,
+    # dose, yield; absent means "not recorded".
+    #
+    # These are what the LAST SHOT card shows, in preference to the live
+    # ::settings, because the two answer different questions (0.25.0):
+    #
+    #   ::settings(grinder_setting) and friends are what is staged RIGHT NOW
+    #   -- what the NEXT shot will use and record. The shot file is what the
+    #   LAST shot actually used. They agree until you change a setting, or
+    #   until you correct a shot's record in the Shot History Editor -- which
+    #   writes the file and nothing else, so the live value keeps reporting
+    #   the figure you just corrected away from.
+    #
+    # ::settings(drink_weight) additionally does not survive a restart, which
+    # is how the tablet came to show "YIELD 0.0" beside a grind tile calling
+    # the same shot 37.8g (0.24.1).
+    #
+    # CLEARED when a shot starts (latch_shot_profile): from that moment the
+    # file is no longer about the last shot, and the live settings are exactly
+    # what the running shot is recording, so they become the better source.
+    variable last_shot_rec
+    array set last_shot_rec {}
+
     # after-id of the debounced machine-settings save/send (settings page).
     variable machine_apply_id ""
+
+    # The bags the cycler can reach, newest first, capped at lumen_bag_count.
+    # Cached because the page indicator reads it on every refresh tick and
+    # SDB must not be. See ::lumen::refresh_bag_list.
+    variable bag_list [list]
+
+    # When each flow page was last SHOWN, in clock milliseconds.
+    #
+    # The core's flow timers keep describing the PREVIOUS flow until the new
+    # one reaches its "during" phase, so a page that reads them the moment it
+    # opens reports the wrong thing (0.24.0: the espresso page flashed the
+    # seconds since the last shot -- 450s -- before resetting to 0 and
+    # counting properly). ::lumen::data::_flow_secs uses this to tell "this
+    # visit's flow" from "the one before it".
+    variable flow_opened
+    array set flow_opened {}
 }
 
 #############################################################################
@@ -264,13 +315,18 @@ proc ::lumen::_init_layout {} {
     set L(bean_x)    16 ; set L(bean_y)  574
     set L(bean_w)  1124 ; set L(bean_h)  210
 
-    # Side panel to the strip's right: Settings and Sleep, stacked. Its own
-    # glass panel so the system actions read as separate from shot prep.
-    # Centred in the taller panel: 210 - (60 + 32 + 60) = 58, so 29 above and
-    # below.
+    # Side panel to the strip's right: Profile, Settings and Sleep, stacked.
+    # Its own glass panel so the system actions read as separate from shot
+    # prep.
+    #
+    # 0.24.0 squeezed PROFILE in (owner request). Three 60-tall buttons plus
+    # gaps do not fit 210, so the height drops to 56 -- still above the 44px
+    # touch floor the cycler arrows are held to, and the same height as the
+    # settings page's own THEME button. Budget: 11 pad, 3 x 56, 2 x 10 gap,
+    # 11 pad = 210, so the column ends at 773 with the panel at 784.
     set L(side_x)  1156 ; set L(side_w)   168
-    set L(side_btn_x) 1170 ; set L(side_btn_w) 140 ; set L(side_btn_h) 60
-    set L(side_y1)  603 ; set L(side_y2)  695
+    set L(side_btn_x) 1170 ; set L(side_btn_w) 140 ; set L(side_btn_h) 56
+    set L(side_y1)  585 ; set L(side_y2)  651 ; set L(side_y3)  717
 
     # ---- bean strip internals (0.23.0) ---------------------------------
     #
@@ -286,31 +342,65 @@ proc ::lumen::_init_layout {} {
     set L(bean_id_x)    40
     set L(bean_id_w)   460
 
-    set L(id_label_y)  590      ;# NEXT SHOT
-    set L(id_prof_y)   613      ;# PROFILE <value>
-    set L(id_roast_y)  637      ;# roaster, small
-    set L(id_name_y)   653      ;# bean type, hero (40px -> 653..693)
-    set L(id_notes_y)  697      ;# tasting notes, only when non-empty
-    set L(id_act_y)    722      ;# action row (48 tall -> 770, 14 clear)
+    # 0.27.0 re-spaced the block (owner: "not have everything tight,
+    # especially the bag name area"). The gaps were 4px above the tasting
+    # notes and 9px below them; they are an even 11 everywhere now, which is
+    # what a 40px hero needs to stop looking wedged between two lines.
+    #
+    # The row that paid for it is the old dedicated PROFILE line: NEXT SHOT
+    # only ever used the left third of its row, so PROFILE moved up beside
+    # it. That is a whole 24px row recovered without dropping anything.
+    #
+    #   590 label+profile   617 roaster   644 hero (->684)   695 notes
+    #   722 action row (->770), 14 clear of the strip edge at 784
+    set L(id_label_y)  590      ;# NEXT SHOT ... PROFILE <value>
+    set L(id_roast_y)  617      ;# roaster, small
+    set L(id_name_y)   644      ;# bean type, hero (40px -> 684)
+    set L(id_notes_y)  695      ;# tasting notes, only when non-empty
+    set L(id_act_y)    722      ;# action row (48 tall -> 770)
 
-    set L(id_val_x)    130      ;# where the PROFILE value starts
+    set L(id_prof_x)   170      ;# the PROFILE label, on the NEXT SHOT row
+    set L(id_val_x)    245      ;# and its value
+    set L(id_val_w)    255
 
-    # Action row: [ <  ] [ Edit ] [  > ], filling the identity block's full
-    # 460 width. The arrows were 40x34 and the owner reported them as tiny --
-    # well under the 60px touch guidance and hard to hit next to each other.
-    # They are 120 wide now with Edit BETWEEN them (owner request), which also
-    # stops a mis-tap on one arrow landing on the other.
-    #   40..160   190..350   380..500
-    set L(cyc_w)       120 ; set L(cyc_h)  48
+    # The cycler arrows are a stepper pill's size now (owner request), down
+    # from 120 wide. They stay on the action row with Edit BETWEEN them: two
+    # arrows side by side invite a mis-tap that sends you the wrong way
+    # through the bags, which is why Edit was put between them in 0.23.0.
+    #
+    # A first cut of 0.27.0 moved them up to flank the bag name at the
+    # block's two edges. The preview killed it: the right arrow landed 20px
+    # from the GRIND column's minus pill, at the same size, shape and height
+    # -- it read as one of GRIND's controls. The name row is better off with
+    # the full 460 anyway.
+    #
+    #   40..84   96..256   268..312
+    set L(cyc_w)        44 ; set L(cyc_h)  48
     set L(cyc_y)       722
     set L(cyc_prev_x)   40
-    set L(cyc_next_x)  380
-    set L(id_edit_x)   190 ; set L(id_edit_w) 160 ; set L(id_edit_h) 48
+    set L(cyc_next_x)  268
+    set L(id_edit_x)    96 ; set L(id_edit_w) 160 ; set L(id_edit_h) 48
+
+    # The hero name keeps the block's full width.
+    set L(id_name_x)    40 ; set L(id_name_w) 460
+
+    # iPhone-style page indicator for the bag cycler (0.27.0), centred in the
+    # action row's remaining width: (312 + 500) / 2 = 406. At 10 bags -- the
+    # most lumen_bag_count allows -- the row of dots is about 140 wide, so it
+    # keeps ~35px clear of the right arrow and of the block's edge.
+    set L(bag_dots_x)  406 ; set L(bag_dots_y) 746
 
     # Three columns spread evenly across 520..1116 (596 wide): 3 x 176 = 528,
     # two 34 gaps, so a 210 pitch ending flush at 940 + 176 = 1116.
     set L(bean_fact_x)  520
     set L(bean_fact_w)  210        ;# column pitch
+
+    # The "-" glyph renders LOW inside its pill. Measured on the tablet
+    # (0.27.0): against a pill centre at y=666, the minus ink sat at 668.5 and
+    # the plus at 666.5 -- Tk centres the text bounding box, and a hyphen's
+    # ink is not centred within that box the way a plus sign's is. Two design
+    # px up puts the two glyphs on the same line as each other.
+    set L(step_minus_dy) -2
 
     # Stepper group internals: pill, gap, value span, gap, pill = 176.
     #
@@ -362,6 +452,15 @@ proc ::lumen::_init_layout {} {
     set L(last_met_val_y)  112
     set L(last_met_sub_y)  140  ;# the derived ratio, under YIELD
 
+    # Water tank level (0.24.0), in the card's top-right corner -- the only
+    # space on the page that was empty, and where every other skin puts its
+    # tank indicator. It is machine status rather than shot data, so it takes
+    # the blue flow colour instead of the ink scale: it must not read as one
+    # of the four metrics beneath it.
+    #   label 36..52, value 30..56, metric labels start at 88.
+    set L(water_label_y)  36
+    set L(water_val_y)    30
+
     # Shot history is a text link now, matching Curve / Shot analysis on the
     # grind tile rather than being the only button on the card.
     set L(hist_y)      172
@@ -387,6 +486,41 @@ proc ::lumen::_init_layout {} {
     set L(fc_panel_x)   170  ; set L(fc_panel_y)  520
     set L(fc_panel_w)  1000  ; set L(fc_panel_h)  150
     set L(fc_hint_y)    700
+
+    # ---- settings page grid --------------------------------------------
+    #
+    # These were literals inside build_settings and restated again in
+    # tools/check_skin.tcl and make_backgrounds.py, so a change had to be made
+    # in three places. They are tokens now; the generator still mirrors them
+    # by hand (it is Python) but the harness reads these.
+    #
+    # Left 170..630 (460 wide), right 670..1170 (500 wide) -- 170 clear on
+    # BOTH page edges, one md gap between the columns.
+    #
+    # 0.24.0 briefly made them equal, for a build where DECENT APP sat in the
+    # left column: its 200-wide button does not clear the caption beside it
+    # inside 460. The owner then placed DECENT APP bottom-RIGHT instead, so
+    # the wide column holds every button again and these are back to the
+    # tablet-verified 460 / 500. Do not "tidy" them to equal widths without
+    # moving a button first.
+    set L(set_col_l)  170 ; set L(set_col_l_w) 460
+    set L(set_col_r)  670 ; set L(set_col_r_w) 500
+    set L(set_row_h)  118 ; set L(set_rows) {110 244 378 512}
+    set L(set_done_y) 690 ; set L(set_done_w) 240 ; set L(set_done_h) 72
+
+    # Stepper group inside a settings row: pill, gap, value, gap, pill.
+    set L(set_step_w) 44 ; set L(set_step_gap) 8
+    set L(set_val_w) 100 ; set L(set_step_h)  48
+
+    # The alternating rows' mode line (0.26.0): "TIME | flow". The second word
+    # starts at a fixed offset so the two text items never reflow -- the
+    # longest first word is TEMP at ~40px, so 70 clears it.
+    #
+    # Its tap target is 48 tall (over the 44px floor) and wide enough to be
+    # hit without aiming, while ending well clear of the stepper group: the
+    # left column's group starts at 402, this ends at 170 + 24 + 180 = 374.
+    set L(set_mode_dx) 70
+    set L(set_mode_w) 180 ; set L(set_mode_h) 48
 
     # ---- fonts: physical pixels, 16px floor ----------------------------
     # Fallback names first, so every key is valid even if font creation
@@ -777,26 +911,41 @@ proc ::lumen::data::grind_delta {} {
     return [format "%+.1f" $d]
 }
 
-# GrindAdvisor v3's ladder has FOUR rungs, not two -- see its own
-# _forecast_method_label in plugins/GrindAdvisor/GrindAdvisor.tcl:1441:
+# GrindAdvisor v3's ladder has FIVE rungs, not two -- see its own
+# _forecast_method_label in plugins/GrindAdvisor/GrindAdvisor.tcl:1997:
 #   first_shot  (n=1)  two_shot  (n=2)  regression  (n>=3)
-#   regression_fallback  (n>=3 but the fitted slope is too flat to solve)
-# Only the last two were mapped here, so the chip sat empty for the first two
-# shots of every bag. Labels are shortened to fit the 150px chip; the Why?
-# popup carries GrindAdvisor's own full wording.
+#   regression_fallback   (n>=3, but the fitted slope is too flat to solve)
+#   regression_untrusted  (n>=3, the slope solves but R2 < 0.30 -- the times
+#                          are not tracking grind, so the fit is discarded
+#                          and the ladder answers instead)
+# Only the first two were mapped here originally, so the chip sat empty for
+# the first two shots of every bag. Then GrindAdvisor 3.10.0 added the fifth
+# rung and this map was not updated with it, so the chip fell through to the
+# raw dict key and read "regression_unt..." on the tablet (0.27.2).
+#
+# Labels are shortened to fit the 150px chip; the Why? popup carries
+# GrindAdvisor's own full wording. Keep them SHORT -- see the budget on the
+# fallback below.
 proc ::lumen::data::grind_method {} {
     set rec [grind_rec]
     if { $rec eq "" } { return "" }
     set m [_g $rec method]
     switch -exact -- $m {
-        first_shot          { return [translate "First shot"] }
-        two_shot            { return [translate "2-shot"] }
-        regression          { return [translate "Regression"] }
-        regression_fallback { return [translate "Pairwise"] }
+        first_shot           { return [translate "First shot"] }
+        two_shot             { return [translate "2-shot"] }
+        regression           { return [translate "Regression"] }
+        regression_fallback  { return [translate "Pairwise"] }
+        regression_untrusted { return [translate "Weak fit"] }
     }
     # A rung added by a newer GrindAdvisor: show it rather than nothing, so
     # the chip never silently goes blank again.
-    return [_ellipsis $m 16]
+    #
+    # 12, not the 16 this started at. 16 was picked without measuring, and
+    # measured off the tablet screenshot it is ~134px of text in a 150px
+    # chip -- ink to the rounded ends, no margin. font_label is 16px Inter
+    # SemiBold, about 8.4px per character here, so 12 characters is ~100px
+    # and sits inside the chip with room on both sides.
+    return [_ellipsis $m 12]
 }
 
 proc ::lumen::data::grind_band {} {
@@ -829,18 +978,63 @@ proc ::lumen::data::grind_note {} {
 
 # ------------------------------------------------------------ last shot ---
 #
-# Same sources shot.tcl uses when it writes the shot file, so the tile and
-# the saved record always agree. Note dose and grind setting persist across
-# shots, so they read the same for "last" and "next" until you change them.
+# 0.25.0: this card reports THE SHOT'S OWN RECORD, not the machine's current
+# settings.
+#
+# It used to read ::settings(grinder_setting) / (grinder_dose_weight) /
+# (drink_weight) directly -- the same fields shot.tcl writes into the file, so
+# for a shot pulled in this session the two agree and the distinction never
+# showed. It shows in two situations the owner hit:
+#
+#   * Correcting a shot in the Shot History Editor writes the .shot FILE and
+#     nothing else -- by that plugin's design. The live setting keeps
+#     reporting the figure you just corrected away from, so the card denied
+#     an edit that had actually worked.
+#   * ::settings(drink_weight) does not survive a restart at all (0.24.1).
+#
+# So while ::lumen::last_shot_rec holds the newest file's values -- i.e. until
+# a shot starts in this session and the live settings become the better
+# source -- they win. Cost is nil: the file was already read at startup for
+# the chart and the profile name.
+#
+# The NEXT SHOT card is unaffected and still reads the live/DYE-staged values.
+# That is the whole point: one card is the record, the other is the plan.
 
-proc ::lumen::data::last_dose {} {
-    return [_num [_s ::settings(grinder_dose_weight)] 1]
+# One latched field, or "" when the file did not record it.
+proc ::lumen::data::_rec { key } {
+    if { ![info exists ::lumen::last_shot_rec($key)] } { return "" }
+    return $::lumen::last_shot_rec($key)
 }
 
+proc ::lumen::data::_dose_raw {} {
+    foreach src [list [_rec dose] [_s ::settings(grinder_dose_weight)]] {
+        if { [_is_pos $src] } { return $src }
+    }
+    return ""
+}
+
+proc ::lumen::data::last_dose {} {
+    return [_num [_dose_raw] 1]
+}
+
+# The last shot's yield, in descending order of authority:
+#
+#   the file latch            -- what the shot RECORDED, corrections included.
+#   ::settings(drink_weight)  -- what the app recorded for a shot pulled in
+#                                this session, and the field shot.tcl writes.
+#   ::de1(pour_volume)        -- volumetric fallback when no scale reported.
+#
+# Returns "" rather than 0 when there is nothing: a shot pulled without a
+# scale has no yield, and _num turns "" into "--". It used to fall through to
+# whatever the last source held, which printed a confident "0.0" -- the tablet
+# showed exactly that next to a grind tile reporting 37.8g for the same shot.
 proc ::lumen::data::_yield_raw {} {
-    set out [_s ::settings(drink_weight)]
-    if { ![_is_pos $out] } { set out [_s ::de1(pour_volume)] }
-    return $out
+    foreach src [list [_rec yield] \
+                      [_s ::settings(drink_weight)] \
+                      [_s ::de1(pour_volume)]] {
+        if { [_is_pos $src] } { return $src }
+    }
+    return ""
 }
 
 proc ::lumen::data::last_yield {} {
@@ -857,7 +1051,9 @@ proc ::lumen::data::last_time {} {
 }
 
 proc ::lumen::data::last_ratio {} {
-    set d [_s ::settings(grinder_dose_weight)]
+    # Same sources as the DOSE and YIELD shown above it, or the caption would
+    # contradict the two numbers it sits between.
+    set d [_dose_raw]
     set y [_yield_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
     if { [catch { set r [expr {double($y) / double($d)}] }] } { return "--" }
@@ -963,10 +1159,15 @@ proc ::lumen::data::last_name_line {} {
 # The grind the last shot was pulled at. ::settings(grinder_setting) persists
 # across shots, so this reads the same as the next shot's grind until you
 # change it -- the same caveat the dose and yield readouts already carry.
+# Not routed through _is_pos: a grinder setting is not necessarily a number.
+# Plenty of grinders are labelled in clicks, letters or half-steps, and the
+# field is free text, so anything non-empty is a real setting.
 proc ::lumen::data::last_grind {} {
-    set v [string trim [_s ::settings(grinder_setting)]]
-    if { $v eq "" } { return "--" }
-    return $v
+    foreach src [list [_rec grind] [_s ::settings(grinder_setting)]] {
+        set v [string trim $src]
+        if { $v ne "" } { return $v }
+    }
+    return "--"
 }
 
 proc ::lumen::data::bean_sub {} {
@@ -1056,51 +1257,85 @@ proc ::lumen::data::chart_empty_note {} {
     return [translate "No shot data yet - pull a shot"]
 }
 
-# espresso_timer is ([clock milliseconds] - $::timers(espresso_start))/1000.
-# For the first tick of a shot, before espresso_start has been assigned, that
-# subtracts from zero and yields epoch time -- a colossal number flashing on
-# screen before the count starts. Anything outside a plausible shot duration
-# is that glitch, not a reading.
+# Last line of defence on anything shown as a duration. espresso_timer is
+# ([clock milliseconds] - $::timers(espresso_start))/1000, so before
+# espresso_start has ever been assigned it subtracts from zero and yields
+# epoch time -- a colossal number. flush_pour_timer returns the literal
+# strings "-0" and "-1" when its timer has not been started, and "%.0f" of
+# "-0" prints "-0". Anything outside a plausible flow duration is a glitch,
+# not a reading; the +0 normalises "-0" to 0.
 proc ::lumen::data::_sane_secs { v } {
     if { ![string is double -strict $v] } { return 0 }
     if { $v < 0 || $v > 3600 } { return 0 }
-    return $v
+    return [expr {$v + 0}]
 }
 
-proc ::lumen::data::espresso_secs {} {
+# Elapsed seconds of the flow THIS page visit is showing, or 0.
+#
+# 0.24.0. The core's four flow timers (de1app-core/vars.tcl:295-339) are only
+# reset when the NEXT flow of that kind reaches its "during" phase
+# (binary.tcl:1507-1527), while the page opens as soon as the machine enters
+# the state. Between those two moments every timer still describes the
+# PREVIOUS flow, and reading it there is what the owner saw: the espresso page
+# showed ~450s -- the seconds since the last shot began -- for a few frames
+# before flipping to 0 and counting normally. _sane_secs cannot catch that,
+# because 450 is a perfectly plausible number.
+#
+# So the value is only shown when the flow it describes started after this
+# page was last shown (::lumen::flow_opened, latched by latch_flow_open on
+# each page's `show` action):
+#
+#   stop unset/0/before start -> the flow is RUNNING, count from start. Not
+#       gated on the open time: if a page is shown mid-flow -- the skin
+#       reloading, or a dialog closing over it -- the count must not blank.
+#   stop after start          -> the flow has FINISHED. Show its total only if
+#       it is the one this visit ran, so the final time stays on screen after
+#       the shot; a flow from an earlier visit reads 0.
+#
+# Integer division throughout, matching the core's own timer procs, so the
+# display truncates rather than rounding up at the half second.
+proc ::lumen::data::_flow_secs { page start_key stop_key } {
+    set st 0 ; set sp 0
+    catch { set st $::timers($start_key) }
+    catch { set sp $::timers($stop_key) }
+
+    if { ![string is double -strict $st] || $st <= 0 } { return 0 }
+    if { ![string is double -strict $sp] } { set sp 0 }
+
+    if { $sp <= 0 || $sp < $st } {
+        return [expr {([clock milliseconds] - $st) / 1000}]
+    }
+
+    set opened 0
+    catch { set opened $::lumen::flow_opened($page) }
+    if { $st < $opened } { return 0 }
+    return [expr {($sp - $st) / 1000}]
+}
+
+proc ::lumen::data::_flow_text { page start_key stop_key } {
     set t 0
-    catch { set t [espresso_timer] }
+    catch { set t [_flow_secs $page $start_key $stop_key] }
     return "[format %.0f [_sane_secs $t]]s"
+}
+
+# Each page reads ITS OWN timer. They used to share espresso_secs, which is
+# time since the last ESPRESSO started rather than the duration of the current
+# flow: plausible shortly after a shot and 0 once more than an hour had passed
+# (_sane_secs rejects > 3600). That was the "stuck at 0s" of 0.23.2.
+proc ::lumen::data::espresso_secs {} {
+    return [_flow_text espresso espresso_start espresso_stop]
 }
 
 proc ::lumen::data::steam_secs {} {
-    set t 0
-    catch { set t [steam_pour_timer] }
-    return "[format %.0f [_sane_secs $t]]s"
+    return [_flow_text steam steam_pour_start steam_pour_stop]
 }
 
-# Hot water and flush have their OWN timers in the core. They used to read
-# espresso_secs, which is
-#     ([clock milliseconds] - $::timers(espresso_start)) / 1000
-# -- time since the last ESPRESSO started, not the duration of this flow. It
-# looked plausible shortly after a shot (a number that ticks up) and read 0
-# once more than an hour had passed, because _sane_secs rejects > 3600. That
-# is the "stuck at 0s" the owner reported; steam was unaffected because it was
-# already wired to its own timer.
-#
-# The core starts each of these on its own state's "during" phase
-# (de1app-core/binary.tcl:1509-1527), so each page gets the right elapsed
-# time: HotWater -> water_pour_timer, HotWaterRinse -> flush_pour_timer.
 proc ::lumen::data::water_secs {} {
-    set t 0
-    catch { set t [water_pour_timer] }
-    return "[format %.0f [_sane_secs $t]]s"
+    return [_flow_text water water_pour_start water_pour_stop]
 }
 
 proc ::lumen::data::flush_secs {} {
-    set t 0
-    catch { set t [flush_pour_timer] }
-    return "[format %.0f [_sane_secs $t]]s"
+    return [_flow_text hotwaterrinse flush_pour_start flush_pour_stop]
 }
 
 # The steam page's temperature is the STEAM HEATER sensor
@@ -1137,6 +1372,67 @@ proc ::lumen::data::steam_flow_note {} {
     set v [_s ::settings(steam_flow)]
     if { ![string is double -strict $v] } { return "" }
     return "[format %.1f [expr {$v / 100.0}]] mL/s"
+}
+
+# The same number without the unit, for the big value in FLOW mode -- the row
+# already says Flow, so "0.8 mL/s" at 26px mono only crowds the pills.
+proc ::lumen::data::steam_flow_value {} {
+    set v [_s ::settings(steam_flow)]
+    if { ![string is double -strict $v] } { return "--" }
+    return [format %.1f [expr {$v / 100.0}]]
+}
+
+# ---- alternating rows (0.26.0) --------------------------------------------
+#
+# STEAM shows time OR flow, HOT WATER temperature OR volume: one -/+ group per
+# row driving whichever half is selected, with the other shown small beneath
+# it. Owner request, from a mockup.
+#
+# The mode is a Lumen preference, not a machine setting, and it persists --
+# whichever half you last steered is the one waiting for you next time.
+
+proc ::lumen::data::steam_value {} {
+    if { [::lumen::steam_mode] eq "flow" } { return [steam_flow_value] }
+    return [steam_time_value]
+}
+
+proc ::lumen::data::steam_value_alt {} {
+    if { [::lumen::steam_mode] eq "flow" } { return [steam_time_value] }
+    return [steam_flow_value]
+}
+
+proc ::lumen::data::water_value {} {
+    if { [::lumen::water_mode] eq "vol" } { return [water_volume_value] }
+    return [water_temp_note]
+}
+
+proc ::lumen::data::water_value_alt {} {
+    if { [::lumen::water_mode] eq "vol" } { return [water_temp_note] }
+    return [water_volume_value]
+}
+
+# The mode line, split across TWO text items so the selected half can be the
+# accent colour and the other one dim: a canvas text item's -fill is fixed at
+# creation, so the words move between two fixed-colour items rather than the
+# colours moving between two fixed words.
+proc ::lumen::data::steam_mode_active {} {
+    if { [::lumen::steam_mode] eq "flow" } { return [translate "FLOW"] }
+    return [translate "TIME"]
+}
+
+proc ::lumen::data::steam_mode_other {} {
+    if { [::lumen::steam_mode] eq "flow" } { return "| [translate {time}]" }
+    return "| [translate {flow}]"
+}
+
+proc ::lumen::data::water_mode_active {} {
+    if { [::lumen::water_mode] eq "vol" } { return [translate "VOL"] }
+    return [translate "TEMP"]
+}
+
+proc ::lumen::data::water_mode_other {} {
+    if { [::lumen::water_mode] eq "vol" } { return "| [translate {temp}]" }
+    return "| [translate {vol}]"
 }
 
 proc ::lumen::data::flush_time_value {} {
@@ -1201,6 +1497,76 @@ proc ::lumen::data::stages_label {} {
 
 proc ::lumen::data::bag_count_value {} {
     return [::lumen::bag_count]
+}
+
+# The bag cycler's page indicator (0.27.0): one dot per reachable bag, filled
+# for the one loaded. Leftmost is the most recent bag, which is the direction
+# the left arrow moves in.
+#
+# Drawn as TEXT, not as canvas ovals, because a canvas item's -fill is fixed
+# at creation: N ovals would need retagging and reconfiguring on every cycle,
+# while a text item is re-evaluated on the refresh tick for free. Both glyphs
+# were verified present in the shipped Inter faces before being used, and go
+# through [format %c] rather than literal UTF-8 -- a literal arrow in this
+# file was mangled once already (Grind Advisor v2.0.2's lesson).
+proc ::lumen::data::bag_dots {} {
+    set n [llength $::lumen::bag_list]
+    # One bag is not a carousel, and zero means SDB has nothing to say.
+    if { $n <= 1 } { return "" }
+    set idx [::lumen::bag_index]
+    set filled [format %c 0x25CF]
+    set hollow [format %c 0x25CB]
+    set out {}
+    for { set i 0 } { $i < $n } { incr i } {
+        lappend out [expr {$i == $idx ? $filled : $hollow}]
+    }
+    return [join $out "  "]
+}
+
+# Which bag of how many, for anyone who cannot read the dots at a glance.
+proc ::lumen::data::bag_position {} {
+    set n [llength $::lumen::bag_list]
+    if { $n <= 1 } { return "" }
+    set idx [::lumen::bag_index]
+    if { $idx < 0 } { return "" }
+    return "[expr {$idx + 1}]/$n"
+}
+
+# Water in the tank, in millilitres (0.24.0, owner request).
+#
+# ::de1(water_level) is the sensor reading in MILLIMETRES, already corrected
+# by ::de1(water_level_mm_correction) where the notification is parsed
+# (de1_comms.tcl:467). The mm -> mL curve comes from the machine's CAD and
+# lives in the core as water_tank_level_to_milliliters (vars.tcl:3924), so
+# that is what converts it -- exactly as DSx2 does it (procs_vars.tcl:470).
+# Never reimplement that table here.
+#
+# The core seeds water_level to 20 before any machine has connected
+# (machine.tcl:137), which would render as a confident "537 ml" with nothing
+# plugged in, so the readout is suppressed unless the machine is actually
+# talking to us. ::de1(last_ping) is the app's own liveness stamp and the
+# water-level notification is one of the things that refreshes it
+# (bluetooth.tcl:2640-2645), so it stays fresh for as long as there is a
+# reading to show -- including while the machine is idle. 10s is the core's
+# own staleness threshold (bluetooth.tcl:1693).
+proc ::lumen::data::water_ml {} {
+    set ping 0
+    catch { set ping $::de1(last_ping) }
+    if { ![string is double -strict $ping] || $ping <= 0 } { return "" }
+    if { [expr {[clock seconds] - $ping}] > 10 } { return "" }
+
+    set mm [_s ::de1(water_level)]
+    if { ![string is double -strict $mm] || $mm <= 0 } { return "" }
+    if { [catch { set ml [water_tank_level_to_milliliters $mm] }] } { return "" }
+    if { ![string is double -strict $ml] } { return "" }
+    return "[expr {round($ml)}] ml"
+}
+
+# Blank the label too when there is no reading, so the card does not carry a
+# lone "WATER" heading with nothing under it.
+proc ::lumen::data::water_label {} {
+    if { [water_ml] eq "" } { return "" }
+    return [translate "WATER"]
 }
 
 proc ::lumen::data::live_weight {} {
@@ -1299,6 +1665,81 @@ proc ::lumen::stages_shown {} {
 # consumes it lands in 0.21.0. The row has to exist now because the settings
 # page background is baked, and a baked page cannot grow a row later without
 # regenerating every asset.
+# ---- the bag cycler's window (0.27.0) --------------------------------------
+#
+# The page indicator has to know how many bags the cycler offers and which one
+# is loaded, on the 200 ms refresh tick. Asking SDB that often is exactly what
+# the accessor rules forbid, so the LIST is cached here and only the index is
+# computed live -- an lsearch over at most 10 strings, against values already
+# in ::settings.
+#
+# Refreshed when the home page is shown and once at startup. That covers a new
+# shot, a scan and a DYE edit without a database read per frame.
+
+proc ::lumen::refresh_bag_list { args } {
+    variable bag_list
+    if { [catch {
+        if { [info procs ::plugins::SDB::available_categories] eq "" } {
+            set bag_list {}
+            return
+        }
+        set bags [::plugins::SDB::available_categories bean_desc 1 {} 0]
+        # Drop blanks: a shot saved with no bean fields yields an empty
+        # bean_desc, and a dot for it would be a dot you cannot reach.
+        set clean {}
+        foreach b $bags {
+            if { [string trim $b] ne "" } { lappend clean [string trim $b] }
+        }
+        set n [::lumen::bag_count]
+        if { [llength $clean] > $n } { set clean [lrange $clean 0 [expr {$n - 1}]] }
+        set bag_list $clean
+    } err] } {
+        msg -ERROR "Lumen: could not read the bag list: $err"
+    }
+}
+
+# The loaded bag, as the string SDB builds for bean_desc: brand, type and
+# roast date joined by single spaces.
+proc ::lumen::current_bag {} {
+    set cur [string trim "[::lumen::data::_field bean_brand] [::lumen::data::_field bean_type] [::lumen::data::_field roast_date]"]
+    regsub -all { +} $cur " " cur
+    return $cur
+}
+
+# Position of the loaded bag in that window, or -1 when it is not in it (a
+# hand-typed bag, or one older than the window allows).
+proc ::lumen::bag_index {} {
+    variable bag_list
+    if { [llength $bag_list] == 0 } { return -1 }
+    return [lsearch -exact $bag_list [current_bag]]
+}
+
+# Which half of the STEAM row the -/+ pills drive: "time" or "flow" (0.26.0).
+# A Lumen preference, stored the same way as the theme and the bag count, so
+# an unknown or missing value falls back rather than throwing.
+proc ::lumen::steam_mode {} {
+    set v "time"
+    catch {
+        if { [info exists ::settings(lumen_steam_mode)] } {
+            set v $::settings(lumen_steam_mode)
+        }
+    }
+    if { $v ne "flow" } { set v "time" }
+    return $v
+}
+
+# Same for HOT WATER: "temp" or "vol".
+proc ::lumen::water_mode {} {
+    set v "temp"
+    catch {
+        if { [info exists ::settings(lumen_water_mode)] } {
+            set v $::settings(lumen_water_mode)
+        }
+    }
+    if { $v ne "vol" } { set v "temp" }
+    return $v
+}
+
 proc ::lumen::bag_count {} {
     set v 5
     catch {
@@ -1323,19 +1764,79 @@ proc ::lumen::bag_count {} {
 # `array set ::settings $props(settings)`, which would replace your entire
 # current configuration -- grinder, dose, profile -- with whatever was saved
 # in that old shot. Only the curve vectors are taken.
-proc ::lumen::load_last_shot_curves {} {
-    # Never clobber a shot in progress.
-    if { ![catch { set n [espresso_elapsed length] }] && $n > 1 } { return }
+# With `path` set (0.30.0), that exact file is loaded instead of the newest
+# in history/ -- the bag cycler uses this so the chart and LAST SHOT card
+# describe the last shot OF THE BAG being cycled to, matching what the
+# grind tile has done since 0.22.0.
+proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
+    if { !$force } {
+        # Startup path, unchanged: never clobber a shot in progress. This
+        # guard also makes the plain call a no-op forever after -- once a
+        # shot is loaded the vectors always hold samples -- which is fine at
+        # startup and exactly why the reload path below cannot use it.
+        if { ![catch { set n [espresso_elapsed length] }] && $n > 1 } { return }
+    } else {
+        # Reload path (0.28.0): the vectors legitimately hold the previous
+        # shot, so length proves nothing. The real "shot in progress" signal
+        # is history_saved: reset_gui_starting_espresso zeroes it when a shot
+        # STARTS (machine.tcl:846) and the core's save sets it back to 1 --
+        # and our own startup load sets it to 1 for exactly the same reason
+        # (see the CRITICAL block below). So 0 here means live unsaved
+        # samples, and reloading would clobber a shot mid-pull or arm the
+        # 0.27.1 overwrite; refuse loudly rather than silently.
+        if { ![catch { set hs $::settings(history_saved) }] && !$hs } {
+            msg -INFO "Lumen: history reload skipped, a shot is in progress"
+            return
+        }
+    }
 
+    if { $path ne "" } {
+        if { ![file isfile $path] } {
+            msg -NOTICE "Lumen: requested shot file [file tail $path] does not exist"
+            return
+        }
+        set newest $path
+    } else {
     set dir "[homedir]/history"
     if { ![file isdirectory $dir] } { return }
 
-    set newest "" ; set newest_t 0
+    # "Newest" means the most recent SHOT, which is not the most recently
+    # modified FILE (0.26.1).
+    #
+    # The app names every shot file YYYYMMDDTHHMMSS.shot, so sorting the names
+    # is sorting by shot time. Sorting by mtime is sorting by "when did
+    # anything last touch this file", and editing a shot's metadata in the
+    # Shot History Editor touches it: a July shot corrected today would become
+    # the file the home page describes, curves and all, until the next shot
+    # was pulled. Seen on the tablet on 2026-08-19 -- the log said "loaded
+    # last shot curves from 20260715T170133.shot" after that file was
+    # restamped, and the LAST SHOT card duly described a shot from a month
+    # earlier.
+    #
+    # mtime remains the fallback for any file whose name is not a timestamp,
+    # and is used only when NO file has a parseable one.
+    set named {} ; set others {}
     foreach f [glob -nocomplain -directory $dir *.shot] {
-        if { [catch { set t [file mtime $f] }] } { continue }
-        if { $t > $newest_t } { set newest_t $t ; set newest $f }
+        if { [regexp {^[0-9]{8}T[0-9]{6}$} [file rootname [file tail $f]]] } {
+            lappend named $f
+        } else {
+            lappend others $f
+        }
+    }
+    set newest ""
+    if { [llength $named] > 0 } {
+        # Every path shares the same directory prefix, so sorting the paths
+        # sorts the names.
+        set newest [lindex [lsort $named] end]
+    } else {
+        set newest_t 0
+        foreach f $others {
+            if { [catch { set t [file mtime $f] }] } { continue }
+            if { $t > $newest_t } { set newest_t $t ; set newest $f }
+        }
     }
     if { $newest eq "" } { return }
+    }
 
     if { [catch {
         array set props [encoding convertfrom utf-8 [read_binary_file $newest]]
@@ -1352,6 +1853,30 @@ proc ::lumen::load_last_shot_curves {} {
             if { [info exists _shot_settings(profile_title)] } {
                 variable last_shot_profile
                 set last_shot_profile [string trim $_shot_settings(profile_title)]
+            }
+            # ... and what the shot was pulled with (0.24.1 yield, 0.25.0
+            # grind and dose). These are what the LAST SHOT card reports:
+            # they carry Shot History Editor corrections, which never reach
+            # the live ::settings, and the yield does not survive a restart
+            # there at all. See the last_shot_rec comment at the top.
+            variable last_shot_rec
+            # 0.28.0: this array must describe THIS file only. It used to be
+            # add-only, which was invisible at startup (the array is empty)
+            # but wrong on reload: delete the newest shot and the previous
+            # shot becomes newest -- if ITS file lacks a value the deleted
+            # shot's number would linger on the card.
+            array unset last_shot_rec
+            array set last_shot_rec {}
+            foreach {key field} {grind grinder_setting \
+                                 dose  grinder_dose_weight \
+                                 yield drink_weight} {
+                if { ![info exists _shot_settings($field)] } { continue }
+                set v [string trim $_shot_settings($field)]
+                if { $v eq "" } { continue }
+                # Grind is free text (clicks, letters, half-steps); the two
+                # weights must be real positive numbers or they are noise.
+                if { $key ne "grind" && ![::lumen::data::_is_pos $v] } { continue }
+                set last_shot_rec($key) $v
             }
         }
         array unset _shot_settings
@@ -1406,7 +1931,69 @@ proc ::lumen::load_last_shot_curves {} {
         }
     }
 
-    msg -INFO "Lumen: loaded last shot curves from [file tail $newest]"
+    # CRITICAL (0.27.1). Tell the app these samples are already in history.
+    #
+    # Without this line, loading a past shot into the live vectors ARMS THE
+    # APP TO OVERWRITE THAT SHOT'S FILE. Measured on the tablet 2026-08-19,
+    # from the log:
+    #
+    #   01:39:30  Lumen: loaded last shot curves from 20260818T164430.shot
+    #   11:42:28  DE1 major state change: Idle => HotWaterRinse, pouring
+    #   11:42:38  Saved this espresso to history      <-- the flush did this
+    #
+    # The 18 Aug shot file was rewritten by a FLUSH the next morning. Its
+    # grinder_setting went from the corrected 8 back to the live 7.5, its
+    # drink_weight from 37.8 to 0, and the file shrank from 29,948 bytes to
+    # 21,506 -- the flush's own data, under the espresso's filename.
+    #
+    # The core's save is registered on after_flow_complete, which fires after
+    # ANY flow, flush and steam included (vars.tcl:3440). Its only guard is
+    #
+    #     !$::settings(history_saved) && [espresso_elapsed length] > 5
+    #                                 && [espresso_pressure length] > 5
+    #
+    # and the filename comes from ::settings(espresso_clock) -- still pointing
+    # at the PREVIOUS shot (vars.tcl:3452-3457). It never checks that the flow
+    # that just finished was an espresso, nor that the samples belong to this
+    # session. Filling those vectors for the home chart is what makes that
+    # guard pass, so the exposure is ours to close even though the write is
+    # the core's.
+    #
+    # history_saved says "the samples currently in the vectors have been
+    # written to history". Having just read them OUT of history, that is
+    # exactly true. reset_gui_starting_espresso sets it back to 0 when a real
+    # shot starts (machine.tcl:846), so a genuine shot still saves normally.
+    if { [catch { set ::settings(history_saved) 1 } err] } {
+        msg -ERROR "Lumen: could not mark the loaded shot as already saved: $err"
+    }
+
+    msg -INFO "Lumen: loaded last shot curves from [file tail $newest] (history_saved marked)"
+}
+
+# Public entry point for plugins that change what history/ holds (0.28.0).
+#
+# ShotHistoryEditor calls this after an edit, a delete or a restore, the same
+# way it already tells Grind Advisor -- so the home page follows a correction
+# without the user pulling a shot first. Everything downstream of the reload
+# is already live: the chart's elements are bound to the BLT vectors, so
+# refilling them redraws the graph, and the LAST SHOT card reads
+# last_shot_rec through polled `var` bindings.
+#
+# The bag list is refreshed too: it is built from SDB, which the caller
+# (ShotHistoryEditor via Grind Advisor's refresh_from_history) has just
+# resynced -- deleting a bag's only shot removes that bag from the cycler.
+#
+# Callers guard on [info procs ::lumen::refresh_after_history_change], so a
+# different skin simply skips this. Safe to call at any time: the loader's
+# reload guard refuses while a shot is in progress.
+proc ::lumen::refresh_after_history_change {} {
+    if { [catch { load_last_shot_curves 1 } err] } {
+        msg -ERROR "Lumen: history reload failed: $err"
+    }
+    if { [catch { refresh_bag_list } err] } {
+        msg -ERROR "Lumen: bag list refresh failed: $err"
+    }
+    return ""
 }
 
 # Recolours a CORE dui dialog that the skin cannot reach through theming.
@@ -1432,10 +2019,29 @@ proc ::lumen::load_last_shot_curves {} {
 # already switched profiles for the next coffee.
 proc ::lumen::latch_shot_profile { args } {
     variable last_shot_profile
+    variable last_shot_rec
     catch {
         set p [string trim [::lumen::data::_s ::settings(profile_title)]]
         if { $p ne "" } { set last_shot_profile $p }
     }
+    # A shot is starting, so the file those values came from is no longer the
+    # last shot. Drop them (0.24.1 yield, 0.25.0 grind and dose): the live
+    # settings are precisely what this shot is about to record, and quoting
+    # the previous shot's numbers as this one's would be worse than either
+    # showing the live values or, for a yield that never arrives, "--".
+    array unset last_shot_rec
+    array set last_shot_rec {}
+}
+
+# Stamps when a flow page was last shown. See ::lumen::data::_flow_secs: the
+# core's timers keep describing the previous flow until the new one reaches
+# its "during" phase, and this is how the accessor tells the two apart.
+#
+# `args` because dui hands a show action the page names it is switching
+# between.
+proc ::lumen::latch_flow_open { page args } {
+    variable flow_opened
+    set flow_opened($page) [clock milliseconds]
 }
 
 proc ::lumen::restyle_core_dialog { page } {
@@ -1557,17 +2163,24 @@ namespace eval ::lumen::act {
 }
 
 # Tap-rate acceleration for the grind / dose / yield steppers (owner
-# request): a slow tap moves 0.1; taps in quick succession (each within
-# 700ms of the last) escalate to 0.5 after three and 1.0 after six, so a
-# big adjustment does not take forty taps. A pause or a direction change
-# drops straight back to 0.1. The app's legacy buttons fire once per press
-# (there is no hold event), so holding registers as its taps do.
+# request): a slow tap moves 0.1; taps in RAPID succession escalate to 0.5
+# after three and 1.0 after six, so a big adjustment does not take forty
+# taps. A pause or a direction change drops straight back to 0.1. The app's
+# legacy buttons fire once per press (there is no hold event), so holding
+# registers as its taps do.
+#
+# The window is 350ms (0.28.1). It shipped at 700ms, and the owner's
+# careful step-step-step pace -- roughly 500-700ms per tap -- landed
+# inside it, so deliberate 0.1 nudges escalated to 0.5 mid-adjustment.
+# Escalation is meant for drumming on the button (3+ taps a second, i.e.
+# under ~350ms apart); a measured pace must stay at 0.1 no matter how many
+# taps it runs to.
 proc ::lumen::act::_accel_step { key dir } {
     variable accel
     set now [clock milliseconds]
     set last 0 ; set streak 0 ; set lastdir 0
     catch { lassign $accel($key) last streak lastdir }
-    if { $dir == $lastdir && ($now - $last) < 700 } {
+    if { $dir == $lastdir && ($now - $last) < 350 } {
         incr streak
     } else {
         set streak 0
@@ -1726,6 +2339,22 @@ proc ::lumen::act::open_app_settings {} {
     }
 }
 
+# Profile chooser, straight from the home page (0.24.0, owner request).
+#
+# settings_1 is the stock profile page -- the profiles listbox, the explanation
+# chart and the brew-temperature control (skins/default/de1_skin_settings.tcl:
+# 192, 934, 1026). show_settings takes the tab to open as its first argument
+# and does the rest itself, including sizing the profile scrollbar on idle
+# (gui.tcl:1403-1425). This is Streamline's own home-page shortcut
+# (Streamline/skin.tcl:607) minus its zoomed-page bookkeeping: no custom
+# navigation of our own, so Done comes back the same way it does from the
+# DECENT APP button, which is tablet-proven.
+proc ::lumen::act::open_profiles {} {
+    if { [catch { show_settings settings_1 } err] } {
+        msg -ERROR "Lumen: could not open the profile list: $err"
+    }
+}
+
 
 # Writes ::settings(grinder_dose_weight) -- the same field shot.tcl records
 # as the shot's dose. Refuses to store a zero or negative reading, so a
@@ -1846,6 +2475,79 @@ proc ::lumen::act::adjust_flush_time { delta } {
         return
     }
     _apply_machine_settings
+}
+
+# steam_flow is ml/s x 100. Step and bounds copied from Streamline's own
+# steam stepper (skin.tcl:2707-2716): 10 per tap, and it refuses to go past
+# 250. The floor is 40 rather than Streamline's 0, because 0.4 mL/s is the
+# minimum its own data-entry dialog for this field declares (skin.tcl:1913)
+# and a tenth of a mL/s is not a steam setting anyone wants to reach by
+# holding a button.
+proc ::lumen::act::adjust_steam_flow { delta } {
+    set cur [::lumen::data::_s ::settings(steam_flow)]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set new [expr {round(double($cur) + $delta)}]
+    if { $new < 40 } { set new 40 } elseif { $new > 250 } { set new 250 }
+    if { [catch { set ::settings(steam_flow) $new } err] } {
+        msg -ERROR "Lumen: could not change the steam flow: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+# Hot water temperature, in degrees C. Streamline steps this by 1 and holds it
+# between 1 and 100 (skin.tcl:2657-2668); the floor here is 20, for the same
+# reason as the steam floor -- nothing below it is a hot water setting, and a
+# runaway tap should stop somewhere sensible.
+proc ::lumen::act::adjust_water_temp { delta } {
+    set cur [::lumen::data::_s ::settings(water_temperature)]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set new [expr {round(double($cur) + $delta)}]
+    if { $new < 20 } { set new 20 } elseif { $new > 100 } { set new 100 }
+    if { [catch { set ::settings(water_temperature) $new } err] } {
+        msg -ERROR "Lumen: could not change the hot water temperature: $err"
+        return
+    }
+    _apply_machine_settings
+}
+
+# The STEAM and HOT WATER pills drive whichever half of their row is selected,
+# so the buttons are wired to a direction (-1 / +1) and the step belongs to
+# the setting, not to the button (0.26.0).
+proc ::lumen::act::adjust_steam { dir } {
+    if { [::lumen::steam_mode] eq "flow" } {
+        adjust_steam_flow [expr {$dir * 10}]
+    } else {
+        adjust_steam_time [expr {$dir * 5}]
+    }
+}
+
+proc ::lumen::act::adjust_water { dir } {
+    if { [::lumen::water_mode] eq "vol" } {
+        adjust_water_volume [expr {$dir * 10}]
+    } else {
+        adjust_water_temp $dir
+    }
+}
+
+proc ::lumen::act::toggle_steam_mode {} {
+    set new [expr {[::lumen::steam_mode] eq "flow" ? "time" : "flow"}]
+    if { [catch {
+        set ::settings(lumen_steam_mode) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the steam row mode: $err"
+    }
+}
+
+proc ::lumen::act::toggle_water_mode {} {
+    set new [expr {[::lumen::water_mode] eq "vol" ? "temp" : "vol"}]
+    if { [catch {
+        set ::settings(lumen_water_mode) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the hot water row mode: $err"
+    }
 }
 
 proc ::lumen::act::adjust_water_volume { delta } {
@@ -2036,6 +2738,24 @@ proc ::lumen::act::_bag_clocks { bag } {
     return {}
 }
 
+# The newest shot FILE for a list of shot clocks (newest first), or "".
+#
+# No SDB query: the app names every shot file from its clock
+# (%Y%m%dT%H%M%S), which is the same filename-matching rule SDB itself
+# uses. A clock whose file is gone (soft-deleted in ShotHistoryEditor) is
+# skipped, so a bag whose latest shot sits in the trash falls back to its
+# next-newest -- the same tolerance the workspace rules require of SDB
+# consumers.
+proc ::lumen::act::_bag_last_shot_file { clocks } {
+    foreach c $clocks {
+        if { [catch {
+            set f "[homedir]/history/[clock format $c -format %Y%m%dT%H%M%S].shot"
+        }] } { continue }
+        if { [file isfile $f] } { return $f }
+    }
+    return ""
+}
+
 proc ::lumen::act::cycle_bag { dir } {
     if { [catch {
         if { [info procs ::plugins::SDB::available_categories] eq "" } {
@@ -2045,26 +2765,17 @@ proc ::lumen::act::cycle_bag { dir } {
             error "the DYE plugin is not loaded"
         }
 
-        set bags [::plugins::SDB::available_categories bean_desc 1 {} 0]
-        # Drop blanks defensively: a shot saved with no bean fields yields an
-        # empty bean_desc, and cycling onto it would clear the bag.
-        set clean {}
-        foreach b $bags {
-            if { [string trim $b] ne "" } { lappend clean [string trim $b] }
-        }
-        set bags $clean
-
-        set n [::lumen::bag_count]
-        if { [llength $bags] > $n } { set bags [lrange $bags 0 [expr {$n - 1}]] }
+        # Rebuild the window first: a shot pulled since the last refresh may
+        # have added a bag, and this is a tap, so it can afford the query.
+        # The page indicator reads the same cached list.
+        ::lumen::refresh_bag_list
+        set bags $::lumen::bag_list
         if { [llength $bags] == 0 } {
             msg -NOTICE "Lumen: no bean bags in the shot database yet"
             return
         }
 
-        # Where are we now? Match on the same string SDB builds for
-        # bean_desc: brand, type and roast date joined by single spaces.
-        set cur [string trim "[::lumen::data::_field bean_brand] [::lumen::data::_field bean_type] [::lumen::data::_field roast_date]"]
-        regsub -all { +} $cur " " cur
+        set cur [::lumen::current_bag]
         set idx [lsearch -exact $bags $cur]
 
         # Not in the list (a hand-typed bag, or one older than the window):
@@ -2072,7 +2783,15 @@ proc ::lumen::act::cycle_bag { dir } {
         if { $idx < 0 } {
             set target 0
         } else {
-            set target [expr {($idx + $dir) % [llength $bags]}]
+            # 0.27.0: the ends are ENDS. Wrapping made every bag look alike --
+            # you could not tell the newest from the oldest, which is exactly
+            # what the owner wanted the indicator to show. Running off either
+            # end now does nothing, and the dots say why.
+            set target [expr {$idx + $dir}]
+            if { $target < 0 || $target >= [llength $bags] } {
+                msg -INFO "Lumen: already at the [expr {$dir < 0 ? {newest} : {oldest}}] bag"
+                return
+            }
         }
         set want [lindex $bags $target]
         if { $want eq $cur } { return }
@@ -2083,6 +2802,19 @@ proc ::lumen::act::cycle_bag { dir } {
         }
         ::plugins::DYE::shots::source_next_from [lindex $clocks 0] {} beans
         msg -INFO "Lumen: next shot bag set to '$want'"
+
+        # 0.30.0 (owner request): the chart and LAST SHOT card follow the
+        # bag, like the grind tile has since 0.22.0. Load the cycled bag's
+        # newest shot file; failure here must not undo the cycle itself,
+        # which has already succeeded.
+        set f [_bag_last_shot_file $clocks]
+        if { $f ne "" } {
+            if { [catch { ::lumen::load_last_shot_curves 1 $f } lerr] } {
+                msg -ERROR "Lumen: could not load '$want' last shot: $lerr"
+            }
+        } else {
+            msg -NOTICE "Lumen: no shot file on disk for bag '$want' (all in trash?); chart left as-is"
+        }
     } err] } {
         msg -ERROR "Lumen: could not cycle the bean bag: $err"
     }
@@ -2138,10 +2870,85 @@ proc ::lumen::var { page x y code args } {
 }
 
 # Invisible tap target. Coordinates in DESIGN px.
+# Visual press feedback (0.29.0, owner request: buttons felt "flat and
+# dead"). The controls are pixels baked into the background image with an
+# invisible zone on top, so nothing reacts natively; this draws a brief
+# crema glow in the zone's own rounded shape the moment it is tapped.
+#
+# Mechanics, and why each choice:
+#  * Drawn straight on .can, NOT through dui add canvas_item -- a press
+#    flash is transient, not page state; dui would keep it in the page's
+#    item list forever.
+#  * Coordinates arrive VIRTUAL (2560x1600, what add_de1_button was given)
+#    and are mapped to screen pixels with the core's rescale_x/y_skin --
+#    the same transform the button zone itself went through, so the glow
+#    lands exactly on the control.
+#  * Tk canvas has no alpha, and faking it was a mistake: 0.29.0 shipped
+#    -stipple gray25, a raw 4x4 checkerboard that the owner read as "a
+#    graphics bug" -- on a high-DPI panel a pixel mesh over the button
+#    looks like corruption, not translucency. 0.29.1 draws a hollow accent
+#    RING instead: a crisp crema outline in the control's rounded shape,
+#    slightly inset, like a focus ring. No fill means the button's own
+#    label stays fully visible under the flash.
+#  * `update idletasks` before returning, or the command that follows
+#    (which may open a page or query a plugin) would run to completion
+#    before the canvas ever painted the flash -- feedback after the fact
+#    is no feedback.
+#  * One shared tag: a new press deletes the previous glow first, so
+#    drumming on a stepper reads as one live glow, not a stack of stale
+#    ones. The 150ms timer clears it by item id; a flash that outlives an
+#    instant page switch dies on the same timer.
+proc ::lumen::press_flash { x1 y1 x2 y2 } {
+    variable C
+    if { [catch {
+        .can delete lumen_tapflash
+        set px1 [rescale_x_skin $x1] ; set py1 [rescale_y_skin $y1]
+        set px2 [rescale_x_skin $x2] ; set py2 [rescale_y_skin $y2]
+        # 0.30.0 (owner feedback on 0.29.1): the ring matches the CONTROL.
+        # Inset is 1px -- just enough that the stroke is not clipped at the
+        # zone boundary -- because the stepper pills' tap zones ARE their
+        # drawn bounds, and a 5px-inset ring floated visibly inside them.
+        # The radius is the baked pills' own corner radius (RADIUS_S = 16
+        # design px in make_backgrounds.py, doubled to virtual, then
+        # rescaled), so on a pill the ring's corners follow the pill's
+        # corners exactly; the half-size clamp below keeps it sane on
+        # thinner zones.
+        set inset [expr {int(max(1, [rescale_y_skin 2]))}]
+        set px1 [expr {$px1 + $inset}] ; set py1 [expr {$py1 + $inset}]
+        set px2 [expr {$px2 - $inset}] ; set py2 [expr {$py2 - $inset}]
+        set r [rescale_y_skin 32]
+        if { $r * 2 > ($px2 - $px1) } { set r [expr {($px2 - $px1) / 2}] }
+        if { $r * 2 > ($py2 - $py1) } { set r [expr {($py2 - $py1) / 2}] }
+        set pts [list \
+            [expr {$px1 + $r}] $py1 \
+            [expr {$px2 - $r}] $py1 \
+            $px2 $py1 \
+            $px2 [expr {$py1 + $r}] \
+            $px2 [expr {$py2 - $r}] \
+            $px2 $py2 \
+            [expr {$px2 - $r}] $py2 \
+            [expr {$px1 + $r}] $py2 \
+            $px1 $py2 \
+            $px1 [expr {$py2 - $r}] \
+            $px1 [expr {$py1 + $r}] \
+            $px1 $py1]
+        set lw [expr {int(max(3, [rescale_y_skin 6]))}]
+        set id [.can create polygon {*}$pts -smooth 1 \
+            -fill "" -outline $C(crema) -width $lw \
+            -tags lumen_tapflash]
+        after 150 [list catch [list .can delete $id]]
+        update idletasks
+    } err] } {
+        msg -DEBUG "Lumen: press flash failed: $err"
+    }
+}
+
 proc ::lumen::tap { page x y w h command label } {
+    set x1 [X $x] ; set y1 [Y $y]
+    set x2 [X [expr {$x + $w}]] ; set y2 [Y [expr {$y + $h}]]
     add_de1_button $page \
-        "say \[translate {$label}\] \$::settings(sound_button_in); $command" \
-        [X $x] [Y $y] [X [expr {$x + $w}]] [Y [expr {$y + $h}]]
+        "::lumen::press_flash $x1 $y1 $x2 $y2; say \[translate {$label}\] \$::settings(sound_button_in); $command" \
+        $x1 $y1 $x2 $y2
 }
 
 #############################################################################
@@ -2304,6 +3111,15 @@ proc ::lumen::build_home {} {
     var $p $lx $L(last_name_y) {[::lumen::data::last_name_line]} \
         -font $L(font_primary) -fill $C(ink) -width $L(last_id_w)
 
+    # --- Water in the tank (0.24.0), above the metrics in the card's
+    # top-right corner. Blue, not the ink scale: it is machine status, and at
+    # this size in ink it would read as a fifth shot metric.
+    var $p $L(last_met_x) $L(water_label_y) {[::lumen::data::water_label]} \
+        -font $L(font_label) -fill $C(ink_3)
+    var $p [expr {$L(last_x) + $L(last_w) - $L(pad_x)}] $L(water_val_y) \
+        {[::lumen::data::water_ml]} \
+        -font $L(font_data) -fill $C(c_flow) -anchor ne -justify right
+
     # Metrics: GRIND joins dose/yield/time (0.23.0), with the derived ratio
     # tucked under YIELD exactly as the next-shot card does it.
     set i 0
@@ -2404,28 +3220,32 @@ proc ::lumen::build_home {} {
     set bx2 $L(bean_id_x)
     set by2 [expr {$L(bean_y) + $L(pad_y)}]
 
-    # 0.23.0 identity block: LABEL, PROFILE, roaster (small), bean type
-    # (hero), tasting notes -- the same row order as the last-shot card.
+    # 0.27.0 identity block. NEXT SHOT and PROFILE share the top row -- the
+    # label only ever used the left third of it -- and the 24px that frees
+    # goes into even 11px gaps around the hero name, which was wedged between
+    # two lines 4px away.
     txt $p $bx2 $L(id_label_y) [translate "NEXT SHOT"] \
         -font $L(font_label) -fill $C(ink_3)
-
-    txt $p $bx2 $L(id_prof_y) [translate "PROFILE"] \
+    txt $p $L(id_prof_x) $L(id_label_y) [translate "PROFILE"] \
         -font $L(font_label) -fill $C(ink_3)
-    var $p $L(id_val_x) $L(id_prof_y) {[::lumen::data::next_profile]} \
-        -font $L(font_caption) -fill $C(ink_2) -width 360
+    var $p $L(id_val_x) $L(id_label_y) {[::lumen::data::next_profile]} \
+        -font $L(font_caption) -fill $C(ink_2) -width $L(id_val_w)
 
     var $p $bx2 $L(id_roast_y) {[::lumen::data::bean_roaster_line]} \
         -font $L(font_caption) -fill $C(ink_3) -width $L(bean_id_w)
-    var $p $bx2 $L(id_name_y) {[::lumen::data::bean_name_line]} \
-        -font $L(font_title) -fill $C(ink) -width $L(bean_id_w)
+
+    # --- the bag name, on a row of its own with the block's full width.
+    var $p $L(id_name_x) $L(id_name_y) {[::lumen::data::bean_name_line]} \
+        -font $L(font_title) -fill $C(ink) -width $L(id_name_w)
 
     # Tasting notes. Blank when the field is unset, so the row costs nothing
     # on a bag that has none.
     var $p $bx2 $L(id_notes_y) {[::lumen::data::bean_notes_line]} \
         -font $L(font_caption) -fill $C(ink_2) -width $L(bean_id_w)
 
-    # --- bag cycler and Edit share the identity block's action row, at the
-    # bottom of the block and clear of the hero name above.
+    # --- action row: [<] [Edit] [>], then the cycler's page indicator. The
+    # arrows shrank to a stepper pill's size (owner request); the 150px that
+    # frees is what the indicator sits in.
     foreach ax [list $L(cyc_prev_x) $L(cyc_next_x)] \
             glyph [list [format %c 0x25C0] [format %c 0x25B6]] \
             dir {-1 1} \
@@ -2443,8 +3263,6 @@ proc ::lumen::build_home {} {
             "::lumen::act::cycle_bag $dir" $lbl
     }
 
-    # Edit (DYE) moved onto this row from the strip's bottom grid, so the
-    # bag's controls sit with the bag.
     glass $p $L(id_edit_x) $L(id_act_y) $L(id_edit_w) $L(id_edit_h) \
         -radius $L(radius_sm) -spec 0
     txt $p [expr {$L(id_edit_x) + $L(id_edit_w) / 2.0}] \
@@ -2453,6 +3271,13 @@ proc ::lumen::build_home {} {
         -anchor center -justify center
     tap $p $L(id_edit_x) $L(id_act_y) $L(id_edit_w) $L(id_edit_h) \
         {::lumen::act::dye_next} "Edit"
+
+    # One dot per reachable bag, filled for the loaded one, leftmost being
+    # the most recent -- which is the direction the left arrow moves in. The
+    # cycler does not wrap any more, so the dots also say when you have run
+    # out of bags in one direction (owner request).
+    var $p $L(bag_dots_x) $L(bag_dots_y) {[::lumen::data::bag_dots]} \
+        -font $L(font_caption) -fill $C(crema) -anchor center -justify center
 
     # --- three Streamline-style stepper groups: label above, then
     # [-]  value  [+] with the live value BETWEEN the pills. ASCII glyphs
@@ -2485,7 +3310,8 @@ proc ::lumen::build_home {} {
                 lbl [list "$what down" "$what up"] {
             glass $p $sx $L(step_y) $L(step_w) $L(step_h) \
                 -radius $L(radius_sm) -spec 0
-            txt $p [expr {$sx + $L(step_w) / 2.0}] $mid_y $glyph \
+            txt $p [expr {$sx + $L(step_w) / 2.0}] \
+                [expr {$mid_y + ($glyph eq "-" ? $L(step_minus_dy) : 0)}] $glyph \
                 -font $L(font_section) -fill $C(crema) \
                 -anchor center -justify center
             tap $p $sx $L(step_y) $L(step_w) $L(step_h) $scode $lbl
@@ -2557,15 +3383,21 @@ proc ::lumen::build_home {} {
         {::lumen::act::scan_bag} "Scan bag"
 
     ####################################################################
-    #  Side panel: Settings and Sleep, in their own panel right of the
-    #  strip. They moved here from the removed rail; without them the skin
-    #  is a dead end with no way back to the skin picker.
+    #  Side panel: Profile, Settings and Sleep, in their own panel right of
+    #  the strip. Settings and Sleep moved here from the removed rail;
+    #  without them the skin is a dead end with no way back to the skin
+    #  picker. Profile joined them in 0.24.0 -- it is the one thing you
+    #  change between shots that the strip could not reach at all.
+    #
+    #  Profile is on top because it is the one you tap during a session;
+    #  Sleep stays at the bottom, furthest from a stray thumb.
     ####################################################################
     glass $p $L(side_x) $L(bean_y) $L(side_w) $L(bean_h)
 
     foreach {gy label action} [list \
-        $L(side_y1) "Settings" {::lumen::act::open_settings} \
-        $L(side_y2) "Sleep"    {start_sleep} ] {
+        $L(side_y1) "Profile"  {::lumen::act::open_profiles} \
+        $L(side_y2) "Settings" {::lumen::act::open_settings} \
+        $L(side_y3) "Sleep"    {start_sleep} ] {
         glass $p $L(side_btn_x) $gy $L(side_btn_w) $L(side_btn_h) \
             -radius $L(radius_sm) -spec 0
         txt $p [expr {$L(side_btn_x) + $L(side_btn_w) / 2.0}] \
@@ -2673,6 +3505,142 @@ proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_l
 #  keeps a single entry point and Lumen's options stay discoverable.
 #############################################################################
 
+# One settings row carrying a -/+ stepper group: the row panel, its label, an
+# optional caption, and [-] value [+] right-aligned inside the row.
+#
+# Factored out in 0.24.0: with the rows re-dealt between the columns, inline
+# copies in each column would have been two versions of the same row that
+# could drift apart. All arguments in DESIGN px.
+proc ::lumen::settings_stepper_row { p x y w label notecode valcode \
+                                     minus_code plus_code what } {
+    variable C
+    variable L
+
+    set rh  $L(set_row_h)
+    set sw  $L(set_step_w)  ; set sg  $L(set_step_gap)
+    set svw $L(set_val_w)   ; set sh  $L(set_step_h)
+
+    glass $p $x $y $w $rh
+    txt $p [expr {$x + $L(pad_x)}] [expr {$y + 26}] $label \
+        -font $L(font_label) -fill $C(ink_3)
+    if { $notecode ne "" } {
+        var $p [expr {$x + $L(pad_x)}] [expr {$y + 56}] $notecode \
+            -font $L(font_caption) -fill $C(ink_2)
+    }
+
+    set gx [expr {$x + $w - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
+    set gy [expr {$y + ($rh - $sh) / 2}]
+    set gmid_y [expr {$gy + $sh / 2.0}]
+    foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
+            glyph [list "-" "+"] scode [list $minus_code $plus_code] \
+            lbl [list "$what down" "$what up"] {
+        glass $p $sx $gy $sw $sh -radius $L(radius_sm) -spec 0
+        txt $p [expr {$sx + $sw / 2.0}] \
+            [expr {$gmid_y + ($glyph eq "-" ? $L(step_minus_dy) : 0)}] $glyph \
+            -font $L(font_section) -fill $C(crema) \
+            -anchor center -justify center
+        tap $p $sx $gy $sw $sh $scode $lbl
+    }
+    var $p [expr {$gx + $sw + $sg + $svw / 2.0}] $gmid_y $valcode \
+        -font $L(font_data) -fill $C(ink) -anchor center -justify center
+}
+
+# A settings row whose -/+ pills drive one of TWO settings, with a tappable
+# mode line choosing which (0.26.0, owner request: STEAM alternates time and
+# flow, HOT WATER temperature and volume).
+#
+# Same panel, same pills, same x geometry as settings_stepper_row -- so the
+# baked background does not change and nothing was re-rendered for this. What
+# differs is inside the row:
+#
+#   * the caption line becomes MODE | other, in two text items. A canvas text
+#     item's -fill is fixed at creation, so the words move between a crema
+#     item and a dim one rather than the colours moving between fixed words.
+#   * the value stacks: the selected setting at 26px on the pill band's upper
+#     line, the other at 16px beneath it -- the same two-line arrangement the
+#     home strip's YIELD column already uses for its ratio.
+#
+# All arguments in DESIGN px.
+proc ::lumen::settings_dual_row { p x y w label active_code other_code \
+                                  valcode altcode dir_cmd toggle_cmd what } {
+    variable C
+    variable L
+
+    set rh  $L(set_row_h)
+    set sw  $L(set_step_w)  ; set sg  $L(set_step_gap)
+    set svw $L(set_val_w)   ; set sh  $L(set_step_h)
+
+    glass $p $x $y $w $rh
+    txt $p [expr {$x + $L(pad_x)}] [expr {$y + 26}] $label \
+        -font $L(font_label) -fill $C(ink_3)
+
+    # Mode line. The selected half is the accent colour, the other dim.
+    var $p [expr {$x + $L(pad_x)}] [expr {$y + 56}] $active_code \
+        -font $L(font_label) -fill $C(crema)
+    var $p [expr {$x + $L(pad_x) + $L(set_mode_dx)}] [expr {$y + 56}] $other_code \
+        -font $L(font_label) -fill $C(ink_3)
+    # One tap over both words: with two modes, "tap the other one" and "toggle"
+    # are the same action, and one target cannot be mis-hit the way two 60px
+    # ones side by side can.
+    tap $p [expr {$x + $L(pad_x)}] [expr {$y + 40}] \
+        $L(set_mode_w) $L(set_mode_h) $toggle_cmd $what
+
+    set gx [expr {$x + $w - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
+    set gy [expr {$y + ($rh - $sh) / 2}]
+    set gmid_y [expr {$gy + $sh / 2.0}]
+    foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
+            glyph [list "-" "+"] d [list -1 1] \
+            lbl [list "$what down" "$what up"] {
+        glass $p $sx $gy $sw $sh -radius $L(radius_sm) -spec 0
+        txt $p [expr {$sx + $sw / 2.0}] \
+            [expr {$gmid_y + ($glyph eq "-" ? $L(step_minus_dy) : 0)}] $glyph \
+            -font $L(font_section) -fill $C(crema) \
+            -anchor center -justify center
+        tap $p $sx $gy $sw $sh "$dir_cmd $d" $lbl
+    }
+
+    # Selected value on top, the other beneath it -- the YIELD column's
+    # arrangement, on the same 48-tall band.
+    set vx [expr {$gx + $sw + $sg + $svw / 2.0}]
+    var $p $vx [expr {$gy + 16}] $valcode \
+        -font $L(font_data) -fill $C(ink) -anchor center -justify center
+    var $p $vx [expr {$gy + 38}] $altcode \
+        -font $L(font_caption) -fill $C(ink_3) -anchor center -justify center
+}
+
+# One settings row whose control is a single button.
+proc ::lumen::settings_button_row { p x y w label caption btn_label \
+                                    command what bw bh args } {
+    variable C
+    variable L
+
+    array set o [list -fill $C(glass_2) -outline $C(glass_brd) \
+                      -ink $C(ink) -caption_w 220]
+    array set o $args
+
+    set rh $L(set_row_h)
+
+    glass $p $x $y $w $rh
+    txt $p [expr {$x + $L(pad_x)}] [expr {$y + 26}] $label \
+        -font $L(font_label) -fill $C(ink_3)
+    if { $caption ne "" } {
+        txt $p [expr {$x + $L(pad_x)}] [expr {$y + 56}] $caption \
+            -font $L(font_caption) -fill $C(ink_2) -width $o(-caption_w)
+    }
+
+    set bx [expr {$x + $w - $L(pad_x) - $bw}]
+    set by [expr {$y + ($rh - $bh) / 2}]
+    glass $p $bx $by $bw $bh -radius $L(radius_sm) \
+        -fill $o(-fill) -outline $o(-outline)
+    if { $btn_label ne "" } {
+        txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
+            [translate $btn_label] -font $L(font_button) -fill $o(-ink) \
+            -anchor center -justify center
+    }
+    tap $p $bx $by $bw $bh $command $what
+    return [list $bx $by]
+}
+
 proc ::lumen::build_settings {} {
     variable C
     variable L
@@ -2684,117 +3652,85 @@ proc ::lumen::build_settings {} {
         -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
 
     ####################################################################
-    #  Left column: machine adjustments, the same -/+ stepper groups as
-    #  the home strip (owner request, mirroring Streamline's settings
-    #  column). Value sits between the pills; changes are saved and sent
-    #  to the machine, debounced by a second.
+    #  Two columns of four rows:
     #
-    #  Column geometry: left 170..630 (460 wide), right 670..1170 (500
-    #  wide) -- 170 clear on BOTH page edges, one 16 gap between rows.
+    #    left  170..630 : BREW / STEAM / FLUSH / HOT WATER  (machine)
+    #    right 670..1170: THEME / BAGS TO CYCLE / GRIND ADVISOR / DECENT APP
+    #
+    #  0.24.0 moved DECENT APP to the BOTTOM RIGHT (owner request). It was
+    #  the second row of the right column; the two preference rows moved up
+    #  to take its place and GRIND ADVISOR sits above it, so the page ends
+    #  on the two "Open" doors with the emphasised one in the corner. The
+    #  left column is untouched -- it is the machine column, and all four
+    #  of its steppers stay together.
+    #
+    #  Rows at 110, 244, 378, 512, so both columns end at 630 -- 60 clear
+    #  above Done at 690. No Chart lines row: the chart's own Stages / Raw
+    #  pills already cover that (owner note).
     ####################################################################
-    set rx 170 ; set rw 460 ; set rh 118 ; set ry 110
-    set sw 44 ; set sg 8 ; set svw 100 ; set sh 48
+    set lx $L(set_col_l) ; set lw $L(set_col_l_w)
+    set rx $L(set_col_r) ; set rw $L(set_col_r_w)
+    lassign $L(set_rows) ry1 ry2 ry3 ry4
 
-    foreach {label notecode valcode minus_code plus_code what} [list \
-        [translate "BREW"] "" {[::lumen::data::brew_temp_value]} \
+    # ---- left column: the machine steppers ------------------------------
+    #
+    # BREW and FLUSH each steer one setting. STEAM and HOT WATER steer two,
+    # chosen by the tappable mode line under their label (0.26.0).
+    foreach {ry label notecode valcode minus_code plus_code what} [list \
+        $ry1 [translate "BREW"] "" {[::lumen::data::brew_temp_value]} \
             {::lumen::act::adjust_brew_temp -0.5} {::lumen::act::adjust_brew_temp 0.5} "Brew" \
-        [translate "STEAM"] {[::lumen::data::steam_flow_note]} {[::lumen::data::steam_time_value]} \
-            {::lumen::act::adjust_steam_time -5} {::lumen::act::adjust_steam_time 5} "Steam" \
-        [translate "FLUSH"] "" {[::lumen::data::flush_time_value]} \
-            {::lumen::act::adjust_flush_time -1} {::lumen::act::adjust_flush_time 1} "Flush" \
-        [translate "HOT WATER"] {[::lumen::data::water_temp_note]} {[::lumen::data::water_volume_value]} \
-            {::lumen::act::adjust_water_volume -10} {::lumen::act::adjust_water_volume 10} "Hot water" ] {
-
-        glass $p $rx $ry $rw $rh
-        txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] $label \
-            -font $L(font_label) -fill $C(ink_3)
-        if { $notecode ne "" } {
-            var $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] $notecode \
-                -font $L(font_caption) -fill $C(ink_2)
-        }
-
-        # [-] value [+], right-aligned in the row.
-        set gx [expr {$rx + $rw - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
-        set gy [expr {$ry + ($rh - $sh) / 2}]
-        set gmid_y [expr {$gy + $sh / 2.0}]
-        foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
-                glyph [list "-" "+"] scode [list $minus_code $plus_code] \
-                lbl [list "$what down" "$what up"] {
-            glass $p $sx $gy $sw $sh -radius $L(radius_sm) -spec 0
-            txt $p [expr {$sx + $sw / 2.0}] $gmid_y $glyph \
-                -font $L(font_section) -fill $C(crema) \
-                -anchor center -justify center
-            tap $p $sx $gy $sw $sh $scode $lbl
-        }
-        var $p [expr {$gx + $sw + $sg + $svw / 2.0}] $gmid_y $valcode \
-            -font $L(font_data) -fill $C(ink) -anchor center -justify center
-
-        set ry [expr {$ry + $rh + $L(md)}]
+        $ry3 [translate "FLUSH"] "" {[::lumen::data::flush_time_value]} \
+            {::lumen::act::adjust_flush_time -1} {::lumen::act::adjust_flush_time 1} "Flush" ] {
+        settings_stepper_row $p $lx $ry $lw $label $notecode $valcode \
+            $minus_code $plus_code $what
     }
 
-    ####################################################################
-    #  Right column: theme, the stock settings, the bag cycler depth and
-    #  the Grind Advisor shortcut. No Chart lines row -- the chart's own
-    #  Stages / Raw pills already cover that (owner note).
-    #
-    #  0.20.0 filled rows 3 and 4. Before that the column stopped after
-    #  DECENT APP and left ~440px empty against four rows on the left.
-    #  Both columns now end at 630, clear of the Done button at 690.
-    ####################################################################
-    set rx 670 ; set rw 500 ; set rh 118
-    set ry 110
-    set sw 44 ; set sg 8 ; set svw 100 ; set sh 48
+    settings_dual_row $p $lx $ry2 $lw [translate "STEAM"] \
+        {[::lumen::data::steam_mode_active]} {[::lumen::data::steam_mode_other]} \
+        {[::lumen::data::steam_value]} {[::lumen::data::steam_value_alt]} \
+        ::lumen::act::adjust_steam ::lumen::act::toggle_steam_mode "Steam"
 
+    settings_dual_row $p $lx $ry4 $lw [translate "HOT WATER"] \
+        {[::lumen::data::water_mode_active]} {[::lumen::data::water_mode_other]} \
+        {[::lumen::data::water_value]} {[::lumen::data::water_value_alt]} \
+        ::lumen::act::adjust_water ::lumen::act::toggle_water_mode "Hot water"
+
+    # ---- right column ---------------------------------------------------
+    #
     # THEME. The button deliberately is NOT accent-coloured: it is plain
     # glass, so it renders dark in the dark theme and light in the light
-    # theme -- the button itself shows the theme (owner request).
+    # theme -- the button itself shows the theme (owner request). Its label
+    # is live (it names the theme you will get), so the row is drawn here
+    # rather than through settings_button_row.
     set bw 150 ; set bh 56
-    glass $p $rx $ry $rw $rh
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "THEME"] \
+    glass $p $rx $ry1 $rw $L(set_row_h)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry1 + 26}] [translate "THEME"] \
         -font $L(font_label) -fill $C(ink_3)
-    var $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
+    var $p [expr {$rx + $L(pad_x)}] [expr {$ry1 + 56}] \
         {[::lumen::data::theme_note]} \
         -font $L(font_caption) -fill $C(ink_2) -width 290
     set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
-    set by [expr {$ry + ($rh - $bh) / 2}]
+    set by [expr {$ry1 + ($L(set_row_h) - $bh) / 2}]
     glass $p $bx $by $bw $bh -radius $L(radius_sm) -fill $C(glass_2)
     var $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
         {[::lumen::data::theme_label]} \
         -font $L(font_button) -fill $C(ink) -anchor center -justify center
     tap $p $bx $by $bw $bh {::lumen::act::toggle_theme} "Theme"
 
-    # DECENT APP, with a bigger accent button (owner request) -- this is
-    # the door to everything else, so it earns the emphasis.
-    set ry [expr {$ry + $rh + $L(md)}]
-    set bw 200 ; set bh 64
-    glass $p $rx $ry $rw $rh
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "DECENT APP"] \
+    # BAGS TO CYCLE, with the same stepper geometry as the left column
+    # mirrored to this column's inner edge: 670 + 500 - 24 = 1146, and the
+    # group is 204 wide, so it starts at 942.
+    glass $p $rx $ry2 $rw $L(set_row_h)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry2 + 26}] [translate "BAGS TO CYCLE"] \
         -font $L(font_label) -fill $C(ink_3)
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
-        [translate "Machine, profiles, plugins, firmware and everything else."] \
-        -font $L(font_caption) -fill $C(ink_2) -width 240
-    set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
-    set by [expr {$ry + ($rh - $bh) / 2}]
-    glass $p $bx $by $bw $bh -radius $L(radius_sm) \
-        -fill $C(crema_lo) -outline $C(crema_brd)
-    txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
-        [translate "Open"] -font $L(font_button) -fill $C(crema) \
-        -anchor center -justify center
-    tap $p $bx $by $bw $bh {::lumen::act::open_app_settings} "App settings"
-
-    # BAGS TO CYCLE. Same stepper geometry as the left column, mirrored to
-    # this column's inner edge: 670 + 500 - 24 = 1146, and
-    # 44 + 8 + 100 + 8 + 44 = 204 wide, so the group starts at 942.
-    set ry [expr {$ry + $rh + $L(md)}]
-    glass $p $rx $ry $rw $rh
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "BAGS TO CYCLE"] \
-        -font $L(font_label) -fill $C(ink_3)
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry2 + 56}] \
         [translate "Recent bean bags the home strip can cycle through."] \
         -font $L(font_caption) -fill $C(ink_2) -width 220
 
+    set sw $L(set_step_w) ; set sg $L(set_step_gap)
+    set svw $L(set_val_w) ; set sh $L(set_step_h)
     set gx [expr {$rx + $rw - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
-    set gy [expr {$ry + ($rh - $sh) / 2}]
+    set gy [expr {$ry2 + ($L(set_row_h) - $sh) / 2}]
     set gmid_y [expr {$gy + $sh / 2.0}]
     foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
             glyph [list "-" "+"] \
@@ -2802,7 +3738,8 @@ proc ::lumen::build_settings {} {
                         {::lumen::act::adjust_bag_count 1}] \
             lbl [list "Bags down" "Bags up"] {
         glass $p $sx $gy $sw $sh -radius $L(radius_sm) -spec 0
-        txt $p [expr {$sx + $sw / 2.0}] $gmid_y $glyph \
+        txt $p [expr {$sx + $sw / 2.0}] \
+            [expr {$gmid_y + ($glyph eq "-" ? $L(step_minus_dy) : 0)}] $glyph \
             -font $L(font_section) -fill $C(crema) \
             -anchor center -justify center
         tap $p $sx $gy $sw $sh $scode $lbl
@@ -2811,28 +3748,23 @@ proc ::lumen::build_settings {} {
         {[::lumen::data::bag_count_value]} \
         -font $L(font_data) -fill $C(ink) -anchor center -justify center
 
-    # GRIND ADVISOR. Plain glass rather than accent: DECENT APP above is the
-    # one emphasised door on this page, and two accent buttons in one column
-    # would compete.
-    set ry [expr {$ry + $rh + $L(md)}]
-    set bw 200 ; set bh 64
-    glass $p $rx $ry $rw $rh
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 26}] [translate "GRIND ADVISOR"] \
-        -font $L(font_label) -fill $C(ink_3)
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry + 56}] \
+    # GRIND ADVISOR. Plain glass rather than accent: DECENT APP below is the
+    # one emphasised door on this page and two accent buttons would compete.
+    settings_button_row $p $rx $ry3 $rw [translate "GRIND ADVISOR"] \
         [translate "Target time, rounding, history and curve."] \
-        -font $L(font_caption) -fill $C(ink_2) -width 220
-    set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
-    set by [expr {$ry + ($rh - $bh) / 2}]
-    glass $p $bx $by $bw $bh -radius $L(radius_sm) -fill $C(glass_2)
-    txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
-        [translate "Open"] -font $L(font_button) -fill $C(ink) \
-        -anchor center -justify center
-    tap $p $bx $by $bw $bh {::lumen::act::open_grind_advisor} "Grind Advisor"
+        "Open" {::lumen::act::open_grind_advisor} "Grind Advisor" 200 64
 
-    set dw 240 ; set dh 72
+    # DECENT APP, bottom right (owner request) -- the door to everything
+    # else, so it takes the accent and the last word on the page.
+    settings_button_row $p $rx $ry4 $rw [translate "DECENT APP"] \
+        [translate "Machine, profiles, plugins, firmware and everything else."] \
+        "Open" {::lumen::act::open_app_settings} "App settings" 200 64 \
+        -fill $C(crema_lo) -outline $C(crema_brd) -ink $C(crema) \
+        -caption_w 240
+
+    set dw $L(set_done_w) ; set dh $L(set_done_h)
     set dx [expr {$L(center_x) - $dw / 2}]
-    set dy 690
+    set dy $L(set_done_y)
     glass $p $dx $dy $dw $dh -radius $L(radius_sm) \
         -fill $C(crema_lo) -outline $C(crema_brd)
     txt $p [expr {$dx + $dw / 2.0}] [expr {$dy + $dh / 2.0}] \
@@ -3022,6 +3954,17 @@ after 5000 {
     if { [catch { ::lumen::load_last_shot_curves } err] } {
         msg -ERROR "Lumen: loading the last shot curves failed: $err"
     }
+    # Same deferral, same reason: SDB is a plugin and has not finished
+    # loading while the skin is being sourced.
+    ::lumen::refresh_bag_list
+}
+
+# The bag cycler's window, rebuilt whenever the home page is shown -- which
+# catches a new shot, a bag scan or a DYE edit without any of them needing to
+# know about this skin. Once per page show, never on the refresh tick: the
+# page indicator reads the cached list (0.27.0).
+if { [catch { dui page add_action off show ::lumen::refresh_bag_list } err] } {
+    msg -ERROR "Lumen: could not hook the bag-list refresh: $err"
 }
 
 # Core dui dialogs cannot be reached by theming, and recolouring them once at
@@ -3046,6 +3989,19 @@ unset -nocomplain _p
 if { [catch { dui page add_action espresso show ::lumen::latch_shot_profile } err] } {
     msg -ERROR "Lumen: could not hook the shot-profile latch: $err"
 }
+
+# Each flow page stamps when it was shown, so its timer can tell the flow it
+# is about to run from the one before it. Without this the espresso page
+# spends the moments between "the machine entered Espresso" and "the pour
+# started" reading the PREVIOUS shot's timer -- the owner saw it flash 450s,
+# then drop to 0 and count normally (0.24.0). See ::lumen::data::_flow_secs.
+foreach _p {espresso steam water hotwaterrinse} {
+    if { [catch { dui page add_action $_p show \
+                    [list ::lumen::latch_flow_open $_p] } err] } {
+        msg -ERROR "Lumen: could not hook the flow-timer latch for $_p: $err"
+    }
+}
+unset -nocomplain _p
 
 msg -INFO "Lumen skin v$::lumen::version loaded ($::lumen::theme_mode)"
 

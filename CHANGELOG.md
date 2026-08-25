@@ -1,5 +1,721 @@
 # Changelog — Lumen
 
+## 0.30.0 — the chart follows the bag cycler; the flash ring hugs the control
+
+**Safety status: unchanged. Read access widens by one case: the loader can
+be pointed at a SPECIFIC `history/*.shot` file (the cycled bag's newest)
+instead of only the newest overall. Same single-file read, same local
+parse, same `history_saved` guard. Nothing written.**
+
+Two owner requests:
+
+**The chart and LAST SHOT card follow the bag cycler.** Since 0.22.0 the
+grind tile has shown the cycled-to bag's own recommendation — but the chart
+and card stayed on the globally newest shot. Now `cycle_bag` resolves the
+bag's newest shot FILE and loads it: chart, card, profile, all describing
+the bag on screen. Mechanics worth keeping in mind:
+
+* No new SDB API: shot filenames ARE clocks (`%Y%m%dT%H%M%S`), the same
+  matching rule SDB itself uses, so the clocks the cycler already has
+  resolve to paths directly (`_bag_last_shot_file`).
+* A clock whose file is soft-deleted is skipped — the bag falls back to
+  its next-newest shot still on disk; a fully-trashed bag leaves the chart
+  as-is with a NOTICE.
+* A failure to load never undoes the cycle itself, which has already
+  succeeded by then.
+* `load_last_shot_curves` gained an explicit-path mode (third argument);
+  the plain and force behaviours are byte-identical without it.
+
+**The flash ring matches the control (0.29.1 feedback).** Inset drops from
+5px to 1px — stepper pill tap zones ARE their drawn bounds, so the ring now
+sits on the pill's edge instead of floating inside it — and the corner
+radius is the baked pills' own `RADIUS_S` (16 design px), so the ring's
+corners follow the pill's corners exactly.
+
+`check_last_shot.tcl` section J covers the new loader paths: explicit file
+loads over a newer one, a missing path refuses without clobbering the
+latch, the resolver skips trashed files, and clock and filename in the
+fixture derive from ONE `clock scan` — hand-typing both is how a fixture
+silently stops testing anything.
+
+## 0.29.1 — the press flash is a clean accent ring, not a stipple
+
+**Safety status: unchanged — drawing options inside `press_flash` only.**
+
+Owner-reported within minutes of 0.29.0 going live: the flash "looks like a
+graphics bug". It did. `-stipple gray25` is a raw 4x4 pixel checkerboard —
+Tk's only stand-in for alpha — and on a high-DPI panel a pixel mesh laid
+over a button reads as rendering corruption, not as a glow.
+
+The flash is now a **hollow crema ring**: a crisp 3px+ accent outline in the
+control's rounded shape, inset a few px so the stroke sits inside the
+control's visible edge, no fill at all. Reads as a deliberate focus ring,
+and the button's own label stays fully visible under it. Same 150ms life,
+same shared-tag lifecycle, same structural coverage in section L (the inset
+ring still satisfies the points-inside-the-zone assertion by construction).
+
+## 0.29.0 — every tap gets a visual press flash
+
+**Safety status: unchanged. One new drawing helper and one line in `tap`.
+Nothing written, no file handling, no page structure changes.**
+
+Owner request: the buttons felt "flat and dead". They are — every control
+is pixels baked into the background image with an invisible zone on top,
+so nothing could react natively. There was sound feedback (`tap` already
+plays `sound_button_in`) but nothing visual.
+
+* **`::lumen::press_flash`** draws a brief crema glow in the tapped zone's
+  own rounded shape — `-stipple gray25` fakes a 25% glow, since Tk canvas
+  has no alpha — outlined in the accent, gone after 150ms. It reads
+  correctly on both themes because it is built from the palette.
+* **Wired inside `tap`**, so all 38 interactive zones got it in one line:
+  cards, pills, steppers, links, toolbar, settings rows. `update idletasks`
+  fires before the button's command runs, so the glow paints even when the
+  command opens a page or queries a plugin — feedback after the fact is no
+  feedback.
+* **The five full-screen flow-stop zones deliberately do not flash** — they
+  bypass `tap` (they are the core's verbatim stop bindings), and a
+  whole-screen strobe mid-shot is not feedback; the page change is.
+* A new press clears the previous glow first, so drumming on a stepper
+  reads as one live glow rather than a stack; a glow that outlives an
+  instant page switch dies on its own 150ms timer.
+
+`tools/check_skin.tcl` section L asserts all of it structurally: every
+recorded button either carries a flash with **its own zone coordinates** or
+is a full-screen stop; and the glow itself clears its predecessor, stays
+inside the zone, carries the shared tag, and schedules its 150ms clear.
+
+## 0.28.1 — stepper acceleration only on genuinely rapid taps
+
+**Safety status: unchanged — one timing constant in the stepper
+acceleration. No file handling, no page changes, nothing written.**
+
+Owner-reported on the grind stepper: tapping **+** at a careful pace was
+counted as fast tapping, so deliberate 0.1 nudges escalated to 0.5
+mid-adjustment.
+
+The shipped window was 700ms — and a measured step-step-step pace is
+roughly 500–700ms per tap, so it landed inside. The window is now
+**350ms**: escalation requires drumming on the button (3+ taps a second),
+and any measured pace stays at 0.1 no matter how many taps it runs to.
+Thresholds unchanged (0.5 after three rapid taps, 1.0 after six; pause or
+direction change resets).
+
+`tools/check_skin.tcl` section K drives `_accel_step` on a fake clock:
+10 taps at 600ms (the reported pace) and at 400ms stay 0.1 throughout,
+250ms drumming escalates on schedule, and both resets hold. Verified
+against the old 700ms window, where the 600ms case escalates exactly as
+reported — the complaint, reproduced.
+
+## 0.28.0 — the home page follows Shot History Editor changes — TABLET-VERIFIED 2026-08-24
+
+**Safety status: unchanged. No database is opened, and nothing in `history/`
+or `history_v2/` is written, renamed or deleted. This version adds a REREAD
+of the newest shot file — the same single-file read the skin has done at
+startup since 0.24.1 — triggered by ShotHistoryEditor instead of only by
+startup.**
+
+Owner goal: edit or delete a shot in ShotHistoryEditor, return to the home
+screen, and see everything updated — the Grind Advisor card, the chart, and
+the LAST SHOT card. The Grind Advisor card already followed (SHE v0.6.3 +
+polled bindings); the chart and card did not, because
+`load_last_shot_curves` only ever ran at startup: its guard refuses whenever
+the vectors hold samples, and after startup they always do.
+
+* **`load_last_shot_curves` grows a `force` reload path.** The plain call is
+  byte-identical (same guard, same everything) — proven by the harness, whose
+  first reload case shows the plain call still refusing. Force swaps the
+  guard for the real "shot in progress" signal: `history_saved`, zeroed at
+  shot start (machine.tcl:846) and set on save — and set by our own startup
+  load. Force with `history_saved 0` refuses, loudly.
+* **`last_shot_rec` is cleared before repopulating.** It was add-only, which
+  was invisible at startup (empty array) but wrong on reload: delete the
+  newest shot, and if the previous shot's file lacks a value the deleted
+  shot's number lingered on the card. The harness traps this with a
+  yield-less file.
+* **`::lumen::refresh_after_history_change`** is the public entry point SHE
+  v0.7.0 calls: force reload + `refresh_bag_list` (SDB has just been
+  resynced by Grind Advisor's step, so a bag whose only shot was deleted
+  leaves the cycler). Callers guard on `info procs`, so other skins skip it.
+* **The chart and card need nothing else**: chart elements are bound to the
+  BLT vectors, so refilling redraws; the card reads `last_shot_rec` through
+  polled `var` bindings.
+* **The 0.27.1 flush trap stays closed**: every reload path ends with
+  `history_saved 1`, asserted by the harness after each reload case.
+
+`tools/check_last_shot.tcl` section I drives all of it against real files:
+plain call refused, force refused mid-shot, delete-the-newest lands the card
+on the previous shot, sparse file drops the stale yield, flush trap closed.
+
+## 0.27.2 — the method chip showed a raw GrindAdvisor key — NOT YET TABLET-TESTED
+
+**Safety status: unchanged. No database is opened, and nothing in `history/`
+or `history_v2/` is written, renamed or deleted. This version changes one
+label map and one character budget; it touches no file and no shot data.**
+
+Spotted on the tablet: the method chip on the RECOMMENDED GRIND card read
+**`regression_unt...`** — an internal dict key, truncated, ink to the rounded
+ends of the chip.
+
+GrindAdvisor 3.10.0 added a fifth forecast rung, `regression_untrusted` (the
+R² guard: the times are not tracking grind on this bag, so the fitted line is
+discarded and the ladder answers instead). `::lumen::data::grind_method` keeps
+its own short-label map for the 150px chip, and it still had four arms, so the
+new rung fell through to the fallback that shows the raw method name.
+
+* **`regression_untrusted` → "Weak fit"**, in the terse register of the other
+  chips ("2-shot", "Regression", "Pairwise"). The card already carries the
+  full sentence underneath — *"Shot times are not tracking grind on this
+  bag"* — so the chip only has to name the rung.
+* **The fallback budget drops from 16 characters to 12.** 16 was picked
+  without measuring. Measured off the tablet screenshot it is ~134px of text
+  in a 150px chip — no margin at either end. `font_label` is 16px Inter
+  SemiBold, ~8.4px per character, so 12 characters is ~100px and sits inside
+  the chip properly. The fallback is still there: an unknown rung shows
+  something rather than blanking the chip.
+* **`tools/check_skin.tcl` section G** now proves every rung has a chip label.
+  Not from a hand-written list — a stale hand-written list is exactly what
+  failed twice here. Where the workspace has the plugin, it reads the rung
+  names out of `GrindAdvisor.tcl` (every literal assigned to `method`) and
+  runs each through the real accessor, asserting the chip is non-empty, is
+  not the key, has no underscore, and fits 12 characters. Away from the
+  workspace it falls back to the rungs known as of GrindAdvisor 3.10.1.
+  Negative-tested against the 0.27.1 map, where it reproduces
+  `regression_unt...` and fails.
+
+GrindAdvisor 3.10.1 fixes the same gap in its own map, which is what the Why?
+dialog and the diagnostics use. The two maps are separate on purpose — the
+plugin can spell the rung out, the chip has 150px — but they have now gone out
+of step twice, which is what section G is for.
+
+## 0.27.1 — a flush could overwrite the last shot's file — NOT YET TABLET-TESTED
+
+**This one destroyed real data on the tablet, and the exposure was ours.**
+
+### What happened
+
+The 18 August shot file was rewritten by a **flush** the next morning:
+
+| | before | after |
+|---|---|---|
+| `grinder_setting` | 8 (corrected in Shot History) | 7.5 (the live setting) |
+| `drink_weight` | 37.8 | 0 |
+| file size | 29,948 bytes | 21,506 bytes |
+
+From the tablet's own log:
+
+```
+01:39:30  Lumen: loaded last shot curves from 20260818T164430.shot
+11:42:28  DE1 major state change: Idle => HotWaterRinse, pouring
+11:42:38  Saved this espresso to history        <-- the flush did this
+```
+
+No espresso ran between those lines. The file's mtime is 11:42:38 to the
+second, and Shot History Editor's log has no entry there — it was not an edit.
+
+### Why
+
+The core registers its save on **`after_flow_complete`**, which fires after
+*any* flow — flush and steam included (`vars.tcl:3440`). Its entire guard is:
+
+```tcl
+!$::settings(history_saved) && [espresso_elapsed length] > 5
+                            && [espresso_pressure length] > 5
+```
+
+and the filename is built from `::settings(espresso_clock)` — still pointing
+at the *previous* espresso (`vars.tcl:3452-3457`). It never checks that the
+flow which just completed was an espresso, nor that the samples in the vectors
+belong to this session.
+
+**`load_last_shot_curves` fills exactly those vectors at startup**, so the
+home chart can show your last shot. That is what makes the guard pass. The
+write is the core's; the condition is ours.
+
+### The fix
+
+One line, after the vectors are loaded:
+
+```tcl
+set ::settings(history_saved) 1
+```
+
+`history_saved` means "the samples currently in the vectors have been written
+to history". Having just read them *out* of history, that is exactly true —
+this is not a workaround, it is the flag telling the truth.
+`reset_gui_starting_espresso` sets it back to 0 when a real shot starts
+(`machine.tcl:846`), so genuine shots still save normally.
+
+### Recovering the damaged file
+
+Shot History Editor's own backups have it intact:
+`backups/20260819T002956_0d17/20260818T164430.shot` — 29,948 bytes,
+`grinder_setting 8`, `drink_weight 37.8`.
+
+### Harness
+
+`check_last_shot.tcl` now sets `history_saved` to 0 before calling the loader
+— the state that caused the loss — and asserts it comes back 1. The failure
+message names the consequence rather than the symptom: *"a flush would
+overwrite it"*.
+
+## 0.27.0 — the bag cycler gets a page indicator, and room to breathe — NOT YET TABLET-TESTED
+
+**Safety: display only. No new writes; the cycler still hands the bag change
+to DYE's own `source_next_from`, as before.**
+
+Four owner requests, all on the next-shot card.
+
+### The arrows are a stepper pill's size
+
+They were 120x48; they are 44x48 now, the same as a `-` / `+` pill. **Edit
+stays between them**, which is the arrangement 0.23.0 introduced precisely so
+a mis-tap on one arrow cannot land on the other and send you the wrong way
+through the bags.
+
+A first cut moved them up to flank the bag name at the identity block's two
+edges. **The preview killed it before anything was baked:** the right arrow
+landed 20px from the GRIND column's minus pill, at the same size, the same
+shape and the same height — it read as one of GRIND's controls. There is now
+an assertion that the arrows never share the stepper pills' row.
+
+### The minus sits where the plus sits
+
+Measured on a tablet screenshot rather than guessed. Against a pill centre of
+y=666, the ink was:
+
+| glyph | ink centre | offset |
+|---|---|---|
+| `-` | 668.5 | **+2.5** |
+| `+` | 666.5 | +0.5 |
+
+Tk centres the text *bounding box*, and a hyphen's ink is not centred inside
+that box the way a plus sign's is. Every stepper in the skin now lifts the
+minus by 2 design px (`L(step_minus_dy)`), which puts the two glyphs on the
+same line as each other. Four drawing sites, one token.
+
+### A page indicator, and no more wrap-around
+
+One dot per reachable bag, filled for the one loaded, leftmost being the most
+recent — the direction the left arrow moves in.
+
+**The cycler no longer wraps.** Running off either end does nothing now.
+Wrapping made every bag look alike; you could not tell the newest from the
+oldest, which is exactly what the owner wanted to see at a glance.
+
+Two implementation notes worth keeping:
+
+* The dots are **text, not canvas ovals**. A canvas item's `-fill` is fixed at
+  creation, so N ovals would need retagging and reconfiguring on every cycle,
+  while a text item is re-evaluated on the refresh tick for free. Both glyphs
+  (U+25CF, U+25CB) were verified present in the shipped Inter faces before
+  being used, and go through `[format %c]` rather than literal UTF-8.
+* The **bag list is cached** (`::lumen::bag_list`, refreshed on the home
+  page's `show` and once at startup). The indicator needs to know how many
+  bags there are on every 200 ms tick, and asking SDB that often is exactly
+  what the accessor rules forbid. Only the index is computed live — an
+  `lsearch` over at most 10 strings already in `::settings`.
+
+### The card was too tight
+
+Owner: *"now the space will be very tight, improvise and better rearrange the
+next shot card"*. The gaps around the 40px hero name were 4px above the notes
+and 9px below them. They are an even **11px everywhere** now.
+
+The row that paid for it is the old dedicated PROFILE line: `NEXT SHOT` only
+ever used the left third of its row, so PROFILE moved up beside it — a whole
+24px row recovered without dropping anything. The bag name also gets the
+block's full 460px back, since the arrows no longer flank it.
+
+There is a check that every gap in the block is at least `sm`, so the next
+thing added here cannot quietly re-crowd it.
+
+### Harness
+
+New section **J**: the indicator across six states (newest / middle / oldest
+loaded, a bag outside the window, a single bag, no bags), and the end stops —
+that the cycler refuses to run off either end, still moves in the middle, and
+still recovers to the newest bag from a bag outside the window.
+
+## 0.26.1 — the last shot is the newest SHOT, not the newest FILE
+
+**Safety unchanged: one file read, nothing written.**
+
+Caught in the tablet log minutes after 0.26.0 went on:
+
+```
+Lumen: loaded last shot curves from 20260715T170133.shot
+```
+
+A shot from **15 July** was being presented as the last one — its curves on
+the home chart, its grind, dose and yield on the LAST SHOT card — because
+`load_last_shot_curves` picked the file with the newest **mtime**.
+
+mtime is "when did anything last touch this file", not "when was this shot
+pulled". Correcting a shot's metadata in the Shot History Editor touches it,
+and as of ShotHistoryEditor v0.6.0 it deliberately stamps the time so SDB will
+re-read it. So **every metadata edit promoted that shot to "last shot" on the
+home page** until the next real shot was pulled. In this case the trigger was
+the restamp of that July file, done an hour earlier to make an old correction
+visible to SDB.
+
+The app names every shot file `YYYYMMDDTHHMMSS.shot`, so sorting the names is
+sorting by shot time. That is what the loader does now. mtime survives only as
+a fallback for a file whose name is not a timestamp, and only when no file has
+a parseable one.
+
+**The fix in one line: the two plugins are right to touch mtime — the skin was
+wrong to read it as a clock.**
+
+### Harness
+
+`tools/check_last_shot.tcl` builds two shots now, and sets the OLDER one's
+mtime a day AHEAD of the newer one — exactly the state an edit leaves behind.
+The existing assertions do the rest: an mtime-based loader latches "Old
+profile" and 8.5, and the test fails.
+
+It also asserts the trap itself is live (`older shot 86400s NEWER on disk`)
+before relying on it. Without that check, a fixture whose mtimes silently
+stopped differing would pass whether or not the bug was present — a test that
+proves nothing while looking green.
+
+## 0.26.0 — STEAM and HOT WATER alternate between two settings — NOT YET TABLET-TESTED
+
+**Safety: display and machine preferences only. No database is opened; the
+only file read is the newest `history/*.shot`, as since 0.9.0. The two new
+steppers write `::settings(steam_flow)` and `::settings(water_temperature)`,
+both clamped, both saved and sent through the same debounced
+`save_settings` + `save_settings_to_de1` path the other machine steppers
+already use.**
+
+Owner request, from a mockup: one `-/+` group per row, driving whichever half
+of the row is selected.
+
+* **STEAM** alternates **TIME** (`steam_timeout`, ±5s) and **FLOW**
+  (`steam_flow`, ±0.1 mL/s).
+* **HOT WATER** alternates **TEMP** (`water_temperature`, ±1°C) and **VOL**
+  (`water_volume`, ±10 ml).
+
+Tap the mode line under the row's label to switch. The choice is a Lumen
+preference (`lumen_steam_mode`, `lumen_water_mode`) and persists, so whichever
+half you last steered is the one waiting next time.
+
+### How it renders
+
+The selected setting is the 26px value on the pill band's upper line, the
+other sits at 16px beneath it — the same two-line arrangement the home strip's
+YIELD column already uses for its ratio, so nothing new had to be invented.
+
+The mode line is **two text items, not one**: a canvas text item's `-fill` is
+fixed at creation, so the words move between a crema item and a dim one rather
+than the colours moving between fixed words. The second item starts at a fixed
+offset (`set_mode_dx` 70) so the pair never reflows; the longest first word,
+TEMP, is about 40px.
+
+One tap target covers both words. With two modes, "tap the other one" and
+"toggle" are the same action, and a single 180x48 target cannot be mis-hit the
+way two 60px ones side by side can. It ends at x=374 against a stepper group
+starting at 402.
+
+**No background was re-baked.** The panels, the pills and every x coordinate
+are identical to `settings_stepper_row`; only what is drawn inside the row
+changed.
+
+### The two new steppers
+
+Bounds and steps come from Streamline's own controls for the same fields, not
+from guesswork:
+
+* `steam_flow` — 10 per tap and a ceiling of 250, from its steam stepper
+  (`Streamline/skin.tcl:2707-2716`). The floor is 40 rather than its 0,
+  because 0.4 mL/s is the minimum its own data-entry dialog for this field
+  declares (`skin.tcl:1913`) and a tenth of a mL/s is not a steam setting
+  anyone should be able to reach by holding a button.
+* `water_temperature` — 1 per tap, ceiling 100, from `skin.tcl:2657-2668`. The
+  floor is 20 for the same reason.
+
+### Harness
+
+New section **I**: the four display states (each mode of each row, asserting
+the mode line and both values), the fallbacks for an unknown or missing mode,
+and — the case that actually matters — that a `+` tap moves the **selected**
+setting and leaves the other untouched, in all four combinations. Plus both
+clamps driven 400 taps in each direction, and a toggle round trip. The
+existing bottom-left-card assertion was updated: those pills carry a
+direction now (`adjust_water -1` / `1`), not a fixed delta, and it was
+printing a warning without failing the run.
+
+## 0.25.0 — the LAST SHOT card reports the shot's own record — NOT YET TABLET-TESTED
+
+**Safety: display only. No database is opened. Nothing in `history/` or
+`history_v2/` is written, renamed or deleted — no version of this skin ever
+has. Read access is one file: the newest `history/*.shot`, which
+`load_last_shot_curves` has opened at startup since 0.9.0; this version takes
+three more fields out of the copy it had already parsed.**
+
+**The header's SAFETY STATUS block was wrong** and is corrected here. It
+claimed nothing in `history/` was read at all, which stopped being true when
+the curve loader was added. A safety note that overstates the case is worse
+than none, because the next person trusts it.
+
+### What changed
+
+The card read `::settings(grinder_setting)`, `(grinder_dose_weight)` and
+`(drink_weight)` — the machine's **current** settings. Those are the same
+fields `shot.tcl` writes into the shot file, so for a shot pulled in this
+session the two agree and the distinction is invisible. It stops being
+invisible in exactly the case the owner hit:
+
+> *"After I edited the grind setting from Shot History it worked, but it
+> didn't update the Grind Advisor recommended value and the last shot card
+> grind size."*
+
+The edit **had** worked. The Shot History Editor writes the `.shot` file and
+nothing else, by its own design — so the file said `grinder_setting 8` while
+the card, reading the live setting, kept insisting on `7.5`. Both numbers were
+real; the card was answering a different question than its label promised.
+
+So the LAST SHOT card now prefers what the shot **recorded**:
+
+* `::lumen::last_shot_rec(grind|dose|yield)` is latched from the newest shot
+  file's settings block at startup, beside the profile name that was already
+  being taken from it.
+* Those win over the live `::settings` while they exist.
+* They are **dropped when a shot starts** (`latch_shot_profile`, already on
+  the espresso page's `show`). From that moment the file is not about the
+  last shot any more, and the live settings are precisely what the running
+  shot is recording — so they become the better source, not a fallback.
+
+One rule, stated once: **while no shot has run this session the card reports
+the file; once one has, it reports the live values that shot recorded.**
+
+The **NEXT SHOT card is untouched** and still reads the live and DYE-staged
+values. That is the point of the split: one card is the record, the other is
+the plan. There is a harness check that the latch cannot leak into it.
+
+`last_ratio` was reading `::settings(grinder_dose_weight)` directly while the
+yield came from the new chain, so it could have derived a ratio from a dose
+the card was not showing. It uses the same two accessors as the numbers it
+sits between now.
+
+Grind deliberately does **not** go through `_is_pos`: grinder settings are
+free text and plenty of grinders are labelled in clicks, letters or
+half-steps. Anything non-empty is a real setting. The two weights must be
+positive numbers or they are noise.
+
+### What this does NOT fix
+
+**Grind Advisor still will not follow a Shot History edit.** It reads SDB, not
+the shot files; the Shot History Editor never writes SDB; `sync_on_startup` is
+`0` on this tablet so SDB does not re-read the changed file; and even after a
+resync Grind Advisor prefers its saved recommendation while that matches the
+loaded bag. Four blocks, none of them in this skin. That is a Grind Advisor
+pass.
+
+### Harness
+
+* **G** (yield) gained the case that decides the new precedence: a file value
+  and a live value both present, file wins.
+* **G2** (new) covers grind and dose across five states — corrected in Shot
+  History, live only, file grind only, a non-numeric grind, and nothing at
+  all — plus that a starting shot drops the whole latch and that none of it
+  leaks into the next-shot card.
+* `tools/check_last_shot.tcl` now reproduces the tablet state exactly: file
+  `grinder_setting 8` / `drink_weight 37.8`, live `7.5` / `0`, card must
+  render `8 19.1 37.8 (1:1.98)`.
+
+## 0.24.1 — the last shot's yield survives a restart — NOT YET TABLET-TESTED
+
+**Safety: display only. No database is opened; the only file read is the
+newest `history/*.shot`, which `load_last_shot_curves` was already reading for
+the chart and the profile name — one more field is taken from the copy it
+already has in memory. Nothing in `history/` or `history_v2/` is written,
+renamed or deleted, and no version of this skin has ever written to them.**
+
+Spotted on the tablet in the 0.24.0 screenshot: the LAST SHOT card read
+**`YIELD 0.0`** while the grind tile, two inches to its left, described the
+same shot as *"yield: actual 37.8g"*. The shot file confirms it —
+`20260818T164430.shot` has `drink_weight 37.8`.
+
+Two faults, one line apart:
+
+**1. `::settings(drink_weight)` does not survive a restart.** It is a live
+value the app fills at the end of a shot. Force-stopping the app to load a new
+skin — exactly what had just happened — brings it back as 0 while the shot
+file still holds the real figure. `load_last_shot_curves` already opens that
+file at startup for the chart vectors and the profile name, so it latches the
+yield too now (`::lumen::last_shot_yield`). No new file access: the field
+comes from the settings block it had already parsed into a local array.
+
+The latch is **dropped when a shot starts** (`latch_shot_profile`, already
+hooked to the espresso page's `show`). From that moment the file it came from
+is not the last shot any more, and quoting its yield for the new one would be
+a worse lie than showing nothing.
+
+**2. A missing yield was formatted as a reading.** `_yield_raw` fell through
+to `::de1(pour_volume)` and returned whatever it held — including 0 — and
+`_num` duly printed `0.0`. It returns `""` now when no source is positive, so
+`_num` yields `--`. A shot pulled without a scale has no yield; `--` says so
+and `0.0` does not. `last_ratio` reads the same accessor, so the ratio caption
+blanks with it instead of deriving `1:0.00`.
+
+The source order is `::settings(drink_weight)` → `::de1(pour_volume)` → the
+file latch, i.e. most authoritative first, with the restart-proof one last.
+
+### Harness
+
+New section **G**, five yield states — this session's scale weight, the
+volumetric fallback, the post-restart file latch, nothing at all, and junk —
+each asserted on both the yield and the derived ratio caption, plus explicit
+guards that a zero is never printed as `0.0` and that a starting shot clears
+the latch. `tools/` also gained an off-tablet test of
+`load_last_shot_curves` against a real `.shot` file on disk (previously only
+byte-compiled, never executed off-device), which reproduces the tablet case:
+`drink_weight` 0 in settings, 37.8 in the file, card renders `37.8 (1:1.98)`.
+
+## 0.24.0 — water level, Profile shortcut, settings shuffle, flow-timer fix — NOT YET TABLET-TESTED
+
+**Safety: display and preferences only. No database is opened, no file in
+`history/` or `history_v2/` is read, written, renamed or deleted, and this
+version adds no write of any kind — the Profile button hands off to the app's
+own profile page and the app owns everything that happens there.**
+
+Four owner requests, three of them layout.
+
+### Water tank level on the home screen
+
+`WATER` and a millilitre figure in blue, in the top-right corner of the LAST
+SHOT card — the one empty region on the page, and where every other skin puts
+its tank indicator. Blue (`C(c_flow)`), not the ink scale: it is machine
+status, and in ink at that size it read as a fifth shot metric.
+
+`::de1(water_level)` is **millimetres**, already corrected by
+`::de1(water_level_mm_correction)` where the notification is parsed
+(`de1_comms.tcl:467`). The mm → mL curve comes from the machine's CAD and
+lives in the core as `water_tank_level_to_milliliters` (`vars.tcl:3924`), so
+that is what converts it — the same call DSx2 makes
+(`procs_vars.tcl:470`). The table is never reimplemented here.
+
+The reading is suppressed unless the machine is actually talking to us. The
+core seeds `water_level` to 20 before anything has connected
+(`machine.tcl:137`), which would render as a confident "537 ml" with no
+machine plugged in. `::de1(last_ping)` is the app's liveness stamp and the
+water-level notification is one of the things that refreshes it
+(`bluetooth.tcl:2640-2645`), so it stays fresh for exactly as long as there is
+a reading to show — including while the machine sits idle. The threshold is
+the core's own 10 s (`bluetooth.tcl:1693`). The `WATER` label blanks with the
+value, so the card never carries a heading with nothing under it.
+
+### Profile shortcut in the side panel
+
+`Profile` joins `Settings` and `Sleep` in the panel right of the next-shot
+strip, on top — it is the one you tap during a session, and Sleep stays at the
+bottom furthest from a stray thumb. Three 60-tall buttons do not fit the
+210-tall panel, so they are 56 now: still well over the 44px touch floor the
+cycler arrows are held to, and the same height as the settings page's THEME
+button.
+
+It calls `show_settings settings_1` — the stock profile tab, with the profiles
+listbox and the explanation chart
+(`skins/default/de1_skin_settings.tcl:192, 934`). That is Streamline's own
+home-page shortcut (`Streamline/skin.tcl:607`) minus its zoomed-page
+bookkeeping. **No custom navigation of Lumen's own**: `show_settings` sets the
+next page and sizes the profile scrollbar itself (`gui.tcl:1403-1425`), so
+Done returns the same way it already does from DECENT APP, which is
+tablet-proven.
+
+### DECENT APP is the bottom-right card
+
+Owner request. It was the second row of the right column; THEME and BAGS TO
+CYCLE moved up to take its place and GRIND ADVISOR sits directly above it, so
+the page ends on the two "Open" doors with the emphasised one in the corner.
+
+**The left column is untouched** — it is the machine column, and all four of
+its steppers (BREW / STEAM / FLUSH / HOT WATER) stay together.
+
+An intermediate build of this version put DECENT APP bottom-**left** and had
+to equalise the columns to 492 to fit it: its 200-wide button misses the
+caption beside it by 4px inside a 460-wide row. With the button back in the
+wide column that is reverted, and the columns are the tablet-verified 460 /
+500 again. `_init_layout` says so in as many words, because "tidy the columns
+to equal widths" is exactly the kind of change that looks safe and is not.
+
+The rows are drawn through `settings_stepper_row` / `settings_button_row` now.
+Re-dealing them between the columns meant the row bodies had to move, and
+inline copies would have been several versions of the same row that could
+drift apart.
+
+### The timer flashing a high number at the start of a shot
+
+Reported as: *"the timer in the first milliseconds when pulling a shot showed
+a high number like 450, then 0, and counted normally."*
+
+`espresso_timer` is `([clock milliseconds] - $::timers(espresso_start))/1000`,
+and `start_espresso_timers` — the only thing that resets `espresso_start` —
+runs when the machine reaches the flow phase `during`
+(`binary.tcl:1507-1527`). The page opens as soon as the machine enters the
+Espresso **state**, which is earlier: heating, then preinfusion. In that
+window the timer still describes the **previous** shot, so the page reported
+the seconds since that shot began. 450 is 7½ minutes since the last coffee —
+and `_sane_secs` cannot help, because 450 is a perfectly plausible shot
+duration. The same hole exists on steam, water and flush: each would show the
+previous flow's frozen total until the new one started pouring.
+
+The accessors now read `::timers` directly through one helper,
+`::lumen::data::_flow_secs`, which knows whether the flow it is looking at
+belongs to **this** page visit:
+
+* **stop unset, 0, or before start** → the flow is running, count from start.
+  Deliberately *not* gated on the open time: a page shown mid-flow (the skin
+  reloading, a dialog closing over it) must not blank its timer.
+* **stop after start** → the flow has finished. Show its total only if it
+  started after this page was last shown, so the final time stays on screen
+  after a shot while a flow from an earlier visit reads 0.
+
+`::lumen::latch_flow_open`, hooked to each flow page's `show` action, is what
+stamps "last shown". Integer division throughout, matching the core's own
+timer procs, so the display truncates rather than rounding up at the half
+second.
+
+`_sane_secs` also normalises `-0` now. `flush_pour_timer` returns the literal
+strings `"-0"` and `"-1"` when its timer has never been started
+(`vars.tcl:504-512`), and `format %.0f` of `"-0"` prints `-0` — so the flush
+page could show `-0s`. Reading `::timers` directly retires that path, and the
+guard covers anything else that hands the formatter a negative zero.
+
+### Harness
+
+`tools/check_skin.tcl` gained four sections and lost its last hardcoded
+settings-page numbers:
+
+* **D — flow timers.** Seven scenarios against `espresso_secs`, including the
+  reported bug itself (page opened now, timers holding a shot that started
+  450s ago → must read `0s`), a shot running, this visit's finished shot, a
+  page shown mid-shot, junk, and negative zero. Then all four accessors
+  against four simultaneous distinct flows, which is the 0.23.2 regression.
+* **E — water level.** Connected, empty tank, no machine, junk. Asserts the
+  label blanks with the value.
+* **F — profile shortcut.** `show_settings` is stubbed and recorded, so the
+  check is that the button asks for `settings_1` — not merely that it runs.
+* The settings-page geometry checks read `L(set_*)` tokens instead of
+  restating literals, walk the actual (column, row, control, caption) set
+  rather than assuming one control width per column, and assert that the
+  bottom-**right** card's tap target really is `open_app_settings` while the
+  bottom-left one is still the Hot Water stepper. The row order is the whole
+  point of the change, and the background bakes each pill wherever the code
+  says it is — so it has to be checked, not eyeballed.
+* The side-panel check covers three buttons: order, no overlap, the 44px
+  touch floor, and that they still end inside the panel.
+
+The settings row geometry moved out of `build_settings` into
+`::lumen::_init_layout` as `L(set_col_l/set_col_r/set_col_w/set_rows/...)`, so
+the skin and the harness can no longer disagree about it.
+`tools/make_backgrounds.py` still mirrors those numbers by hand — it is
+Python — and **was re-run**: the home and settings backgrounds are baked with
+the third side button and the re-dealt settings cards. Both chart sample
+tokens came back unchanged (`#151618` / `#DEE0E5`, `#171719` / `#DEE1E4`), so
+the palette needed no edit.
+
 ## 0.23.2 — water and flush pages read their own timers — TABLET-VERIFIED 2026-08-15
 
 Display only, no new writes.
