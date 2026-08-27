@@ -5,32 +5,27 @@ A glass dashboard skin for the Decent DE1, by Blastize.
 Lumen replaces the home screen with a dashboard: the current grind
 recommendation, the last shot, the shot graph, and the beans for the next
 shot — all reachable without going into Settings. It is built to work with
-GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor and SDB.
+GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
+and SDB.
 
-**Version 0.30.0 — every page built, baked and running on the tablet.**
+**Version 0.37.1 — every page built, baked and running on the tablet.**
 
-0.28.0: the home page follows Shot History Editor changes — edit or delete a
-shot there and the chart, the LAST SHOT card and the bag cycler reload from
-what `history/` now holds, via `::lumen::refresh_after_history_change`
-(called by ShotHistoryEditor v0.7.0; other skins are unaffected).
+Since 0.30.0 the top of the screen is a **taskbar**: a live clock and date
+(12/24-hour and day-month/month-day formats, chosen on the settings CLOCK
+row), the water level, and wrench / gear / sliders / moon icons — plugin
+maintenance, Lumen settings, the stock app settings, and sleep. A
+**maintenance dot** at the wrench turns amber or red when the
+MaintenanceTracker plugin says something is due or overdue. The old side
+panel is gone; the bean strip runs the full width, and the chart lost its
+toggle pills — it is always smooth, always showing stage lines. Every tap
+answers with a **press flash** fitted to the control: a neutral chip behind
+buttons and text links, an outline for the grind card.
 
-0.24.0 adds the **water tank level** in millilitres to the home screen, a
-**Profile** shortcut beside Settings and Sleep, moves **DECENT APP** to the
-bottom-right card of the Lumen settings page, and fixes the flow-page timers
-flashing the *previous* flow's elapsed time for a moment when a page opens.
-0.24.1 makes the last shot's **yield** survive an app restart — it is read
-back from the shot file — and show `--` rather than `0.0` when the shot was
-pulled without a scale. 0.25.0 extends that to **grind and dose**: the LAST
-SHOT card reports what the shot itself recorded, so a correction made in the
-Shot History Editor shows up there.
-
-Since 0.18.0: every page uses a pre-rendered frosted background rather than
-just the home screen; the next-shot strip gained a **bag cycler** that steps
-through your recently used beans; both cards show the **profile** the shot
-uses, because a profile change now starts a fresh grind calibration; and the
-bean's **tasting notes** sit under its name. The grind tile follows the bag
-you cycle to, showing that bag's own recommendation rather than the last one
-you happened to pull.
+Earlier milestones: the home page follows Shot History Editor edits
+(0.28.0); the LAST SHOT card reports what the shot file records, so
+corrections show up (0.24.1–0.25.0); every page has a pre-rendered frosted
+background and the strip carries the bag cycler (0.18.0–0.23.x). The full
+story is in the CHANGELOG.
 
 ## The home screen
 
@@ -46,20 +41,21 @@ backdrop and let the shadow do the separating.
 
 | Tile | Shows | Tap |
 |---|---|---|
-| Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's result popup |
+| Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL (blank when no machine is connected) | The four icons: wrench = MaintenanceTracker's card list, gear = Lumen settings, sliders = the stock app settings, moon = sleep |
+| Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
+| Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's settings (target time, rounding, history) |
+| Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
 | Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time — as **that shot recorded them**, read back from the shot file, so corrections made in the Shot History Editor appear here. `--` when the shot had no weight | — |
-| Water (Last shot tile, top right) | Water left in the tank, in mL, in blue. Blank when no machine is connected | — |
 | Shot history (Last shot tile) | — | Opens the Shot History Editor (edit / soft-delete past shots) |
-| Graph | Pressure, flow, cumulative weight and basket temperature for the shot, plus dashed stage separators at every frame change | **Stages** and **Raw / Smooth** toggles in its header |
-| Next shot | The profile, the roaster, the bean, and its tasting notes | — |
+| Graph | Pressure, flow, cumulative weight and basket temperature for the shot — always smoothed (Catmull-Rom through the recorded samples), with dashed stage separators at every frame change | — |
+| Next shot | The profile, the roaster, the bean, and its tasting notes | PROFILE row opens the app's profile chooser |
 | ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
 | − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap ±0.1; drumming rapidly (3+ taps a second) escalates to ±0.5 then ±1.0. Any measured pace stays at ±0.1 (0.28.1) |
 | Scale readout | Live weight, or `Connecting` / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
 | Scan bag | — | Bean Scanner |
-| Profile / Settings / Sleep | Their own side panel, right of the strip | The app's profile list, Lumen settings, sleep |
 
 The bag cycler reads your recent beans through SDB's public API and applies
 the chosen one through DYE, so the skin itself opens no database. How many
@@ -196,13 +192,19 @@ The selected setting is the large value between the pills; the other sits
 small beneath it, so both are always readable. The choice persists — whichever
 half you last steered is the one waiting next time.
 
-The right column runs **THEME**, **BAGS TO CYCLE**, **GRIND ADVISOR** and then
-**DECENT APP** — the door to the stock settings, profiles, plugins and
-firmware — as the bottom-right card.
+The right column runs **THEME**, **BAGS TO CYCLE** and **CLOCK**. The
+stock app settings (profiles, plugins, firmware) open from the taskbar's
+sliders icon, and Grind Advisor's settings from the grind card itself —
+so neither needs a row here any more.
 
 *Bags to cycle* (3–10, default 5) sets how many recent bean bags the home
 strip's bag cycler offers. It is stored in `::settings(lumen_bag_count)` and
 is a Lumen preference only — it never reaches the machine.
+
+*Clock* carries two live-labelled buttons: the date sample toggles
+day-month ↔ month-day, the time button toggles 24H ↔ 12H. Both apply to
+the taskbar immediately — no restart — and persist in
+`::settings(lumen_date_format)` / `::settings(lumen_time_format)`.
 
 ## The next-shot strip
 
@@ -216,9 +218,9 @@ never independent — stepping it only ever wrote the target yield — and the
 column was needed for the profile, which now scopes calibration (Grind Advisor
 3.7.0 starts a fresh calibration when the profile changes).
 
-The profile tile is read-only; profiles are chosen in the app's own picker,
-which the side panel's **Profile** button opens directly (`show_settings
-settings_1`, the stock profile tab).
+Profiles are chosen in the app's own picker, which tapping the **PROFILE**
+row on the NEXT SHOT card opens directly (`show_settings settings_1`, the
+stock profile tab).
 
 The **LAST SHOT** card names the profile that shot ran on, which is not
 necessarily the one loaded now — when the two differ, Grind Advisor has
@@ -227,10 +229,6 @@ started a fresh calibration.
 Nothing in the cycler touches the database directly: the bag list and shot
 clock come from SDB's public read API, and the write goes through DYE's own
 `source_next_from`, the same path Bean Scanner uses.
-
-*Grind Advisor* opens that plugin's settings through its public
-`open_settings_dialog`; the plugin's own page captures where it was opened
-from, so **Done** comes straight back here.
 
 The **THEME** row on the Lumen settings page toggles it. Because the palette
 is read once at load and every canvas item is created from it, the change
@@ -269,8 +267,11 @@ written, renamed or deleted.
 Every `::settings` write happens only on an explicit tap, and every stepper
 clamps its value. Three groups:
 
-* **Preferences:** `live_graph_smoothing_technique` (Raw/Smooth),
-  `lumen_chart_stages` (Stages), `lumen_theme` (theme).
+* **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
+  depth), `lumen_time_format` / `lumen_date_format` (taskbar clock).
+  Since 0.36.0 the chart is always smooth with stage lines shown —
+  `live_graph_smoothing_technique` and `lumen_chart_stages` are no
+  longer read or written.
 * **Next-shot steppers:** `grinder_dose_weight` (Set dose — refuses
   non-positive readings — and the dose stepper, 2..40), `grinder_setting`
   (grind stepper, 0..100), `final_desired_shot_weight` /
