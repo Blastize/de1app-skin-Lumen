@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.30.0  (chart follows the bag cycler; flash ring hugs the control)
+#  Version: 0.35.0  (NEXT SHOT card: PROFILE stacked under the label)
 #
 #
 #
@@ -24,10 +24,12 @@ package require de1plus 1.0
 #  Every ::settings write happens only on an explicit tap, and every stepper
 #  clamps its value so a runaway tap cannot write junk.
 #
-#  Preferences (home chart pills + Lumen settings page):
-#    live_graph_smoothing_technique  -- Raw/Smooth toggle
-#    lumen_chart_stages              -- Stages toggle
+#  Preferences (Lumen settings page):
 #    lumen_theme                     -- Dark/Light toggle
+#  (0.36.0: the chart's Raw/Smooth and Stages pills are GONE, owner
+#  request -- Lumen's charts are always smooth (catrom) with stage
+#  separators shown; live_graph_smoothing_technique and
+#  lumen_chart_stages are no longer read or written.)
 #    lumen_bag_count                 -- how many recent bean bags the home
 #                                       strip's bag cycler offers (3..10)
 #
@@ -85,7 +87,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.30.0"
+    variable version "0.37.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -95,10 +97,6 @@ namespace eval ::lumen {
 
     variable F        ;# resolved font family names
     array set F {}
-
-    # Every BLT/RBC graph the skin creates (home page, espresso page). The
-    # smoothing toggle reconfigures all of them.
-    variable chart_widgets [list]
 
     # Pages whose panels are baked into a pre-rendered background image.
     # ::lumen::glass draws nothing on these -- the panel is already in the
@@ -198,6 +196,11 @@ proc ::lumen::set_palette { mode } {
 
         set C(good)        "#12805F"
         set C(warn)        "#B4761A"
+        # 0.32.0: dedicated danger token (maintenance dot's red). The
+        # palette had no red that wasn't a chart series colour; c_temp was
+        # the closest but means "temperature curve". Light variant darker
+        # than dark, same as good/warn/crema.
+        set C(danger)      "#B23641"
 
         set C(c_press)     "#0E9E7C"
         set C(c_flow)      "#3F72E0"
@@ -206,7 +209,8 @@ proc ::lumen::set_palette { mode } {
         set C(grid)        "#D5DBE3"
         # Sampled from the middle of the chart panel in
         # 1340x800/lumen_home_light.png -- the generator prints both.
-        set C(chart_bg)    "#DEE0E5"
+        # (0.31.0: re-sampled at the taskbar-shifted panel centre, y=410.)
+        set C(chart_bg)    "#DEE0E4"
         # The espresso page's chart panel sits at 186..504, the home one at
         # 268..600. Same baked gradient, different height, so a shared value
         # would read as a box cut into one of them. Sampled separately from
@@ -230,6 +234,7 @@ proc ::lumen::set_palette { mode } {
 
         set C(good)        "#2FD3A4"
         set C(warn)        "#E8B34C"
+        set C(danger)      "#DA515E"
 
         set C(c_press)     "#17C29A"
         set C(c_flow)      "#6C9BFF"
@@ -298,35 +303,75 @@ proc ::lumen::_init_layout {} {
     # actually operate -- was the most cramped. 46px moved from the top row
     # and 4 from the chart into the bottom row.
     #
-    #   top cards   16..206   (h 190, was 236)
-    #   chart      222..558   (h 336, was 268..600 / 332)
-    #   bottom     574..784   (h 210, was 168)
+    # 0.31.0 adds the taskbar (Apple-status-bar style) along the top edge.
+    # The page had zero vertical slack (16+190+16+336+16+210+16 = 800), so
+    # the bar's 48 come from the least information-dense donors per the
+    # discovery pass: the chart plot gives 40 and the top cards give 8 of
+    # the ~14px their 0.23.0 budget left genuinely spare. The bean strip --
+    # the page's operating surface -- gives nothing and does not move.
+    #
+    #   taskbar      0..48
+    #   top cards   64..254  (h 190 -- 0.34.1 gave the cards their 8px
+    #                         back after the owner reported the tiles'
+    #                         bottom text rows crowding the border at
+    #                         h 182; the chart pays instead)
+    #   chart      270..558  (h 288, was 336 pre-taskbar)
+    #   bottom     574..784  (h 210, unchanged)
     #
     # Every gap is md (16) and the bottom margin is 16, as before.
-    set L(grind_x)   16 ; set L(grind_y)  16
+    set L(bar_y)      0 ; set L(bar_h)   48
+    set L(bar_time_x) 16            ;# time, mono, pinned left
+    # 0.34.1: day at 170. 0.34.0 put it at 130 on a 13px/glyph estimate;
+    # the tablet render (owner report + screenshot) shows the 26px mono
+    # advance is ~15.5px, so "01:10 AM" ends ~141 and the day TOUCHED it.
+    # 170 leaves ~30px after the widest zero-padded 12h time and a looser
+    # (fine) gap in 24h mode. The day position is fixed at creation, so
+    # it must clear the widest format, not the current one.
+    set L(bar_day_x) 170
+    set L(bar_title_x) 670          ;# "Lumen" wordmark, page centre
+    set L(bar_water_x) 1028         ;# water readout, anchored e, one lg
+                                    ;# clear of the wrench zone at 1052
+
+    # 0.32.0: the bar's four tappables, right-aligned in escalating
+    # consequence toward the corner (Apple convention: passive status at
+    # one end, controls grouped away from it). 56x48 zones on a 72 pitch,
+    # ending flush with the page margin at 1324; every zone is the bar's
+    # full height, comfortably over the 44px touch floor.
+    #   wrench 1052..1108   gear 1124..1180   sliders 1196..1252
+    #   moon 1268..1324
+    set L(bar_icon_w)    56
+    set L(bar_icon_pitch) 72
+    set L(bar_wrench_x) 1052
+    set L(bar_gear_x)   1124
+    set L(bar_sliders_x) 1196
+    set L(bar_moon_x)   1268
+    # Maintenance state dot: top-right corner of the wrench zone, clear of
+    # the 22px glyph centred at (1080, 24).
+    set L(bar_dot_x)    1102 ; set L(bar_dot_y) 12
+
+    set L(grind_x)   16 ; set L(grind_y)  64
     set L(grind_w)  650 ; set L(grind_h) 190
 
-    set L(last_x)   682 ; set L(last_y)   16
+    set L(last_x)   682 ; set L(last_y)   64
     set L(last_w)   642 ; set L(last_h)  190
 
-    set L(chart_x)   16 ; set L(chart_y) 222
-    set L(chart_w) 1308 ; set L(chart_h) 336
+    set L(chart_x)   16 ; set L(chart_y) 270
+    set L(chart_w) 1308 ; set L(chart_h) 288
 
+    # 0.33.0 (taskbar pass 3, owner's Layout 2): the side panel is GONE --
+    # Settings and Sleep live on the taskbar now (tablet-verified in
+    # 0.32.0), Profile is a tap on the identity row's PROFILE value below,
+    # and the strip takes the panel's 184px: full content width, 1308.
     set L(bean_x)    16 ; set L(bean_y)  574
-    set L(bean_w)  1124 ; set L(bean_h)  210
+    set L(bean_w)  1308 ; set L(bean_h)  210
 
-    # Side panel to the strip's right: Profile, Settings and Sleep, stacked.
-    # Its own glass panel so the system actions read as separate from shot
-    # prep.
-    #
-    # 0.24.0 squeezed PROFILE in (owner request). Three 60-tall buttons plus
-    # gaps do not fit 210, so the height drops to 56 -- still above the 44px
-    # touch floor the cycler arrows are held to, and the same height as the
-    # settings page's own THEME button. Budget: 11 pad, 3 x 56, 2 x 10 gap,
-    # 11 pad = 210, so the column ends at 773 with the panel at 784.
-    set L(side_x)  1156 ; set L(side_w)   168
-    set L(side_btn_x) 1170 ; set L(side_btn_w) 140 ; set L(side_btn_h) 56
-    set L(side_y1)  585 ; set L(side_y2)  651 ; set L(side_y3)  717
+    # PROFILE tap zone, over the 0.35.0 dedicated PROFILE row: the full
+    # block width (40..500), 44 tall, centred on the row. It brushes the
+    # label row above and the roaster line below -- text is not a tap
+    # target, zones only may not overlap each OTHER, and no other zone
+    # exists in the identity block above the action row.
+    set L(id_prof_tap_x)  40 ; set L(id_prof_tap_y) 592
+    set L(id_prof_tap_w) 460 ; set L(id_prof_tap_h) 44
 
     # ---- bean strip internals (0.23.0) ---------------------------------
     #
@@ -342,26 +387,29 @@ proc ::lumen::_init_layout {} {
     set L(bean_id_x)    40
     set L(bean_id_w)   460
 
-    # 0.27.0 re-spaced the block (owner: "not have everything tight,
-    # especially the bag name area"). The gaps were 4px above the tasting
-    # notes and 9px below them; they are an even 11 everywhere now, which is
-    # what a 40px hero needs to stop looking wedged between two lines.
+    # 0.35.0 (owner request): PROFILE gets its own row under NEXT SHOT,
+    # matching the LAST SHOT card's stacked order (label / PROFILE /
+    # roaster / hero). That reverses half of 0.27.0, which had merged
+    # PROFILE into the label row to buy even 11px gaps; a dedicated row
+    # costs them. The block re-spaces to a UNIFORM 7px gap everywhere
+    # (top pad 10), so nothing is singled out as wedged, and the action
+    # row does not move:
     #
-    # The row that paid for it is the old dedicated PROFILE line: NEXT SHOT
-    # only ever used the left third of its row, so PROFILE moved up beside
-    # it. That is a whole 24px row recovered without dropping anything.
-    #
-    #   590 label+profile   617 roaster   644 hero (->684)   695 notes
+    #   584 label (->601)   606 profile (->622)   629 roaster (->645)
+    #   652 hero (40px ->692)   699 notes (->715)
     #   722 action row (->770), 14 clear of the strip edge at 784
-    set L(id_label_y)  590      ;# NEXT SHOT ... PROFILE <value>
-    set L(id_roast_y)  617      ;# roaster, small
-    set L(id_name_y)   644      ;# bean type, hero (40px -> 684)
-    set L(id_notes_y)  695      ;# tasting notes, only when non-empty
+    set L(id_label_y)  584      ;# NEXT SHOT
+    set L(id_prof_y)   606      ;# PROFILE <value>, its own row again
+    set L(id_roast_y)  629      ;# roaster, small
+    set L(id_name_y)   652      ;# bean type, hero (40px -> 692)
+    set L(id_notes_y)  699      ;# tasting notes, only when non-empty
     set L(id_act_y)    722      ;# action row (48 tall -> 770)
 
-    set L(id_prof_x)   170      ;# the PROFILE label, on the NEXT SHOT row
-    set L(id_val_x)    245      ;# and its value
-    set L(id_val_w)    255
+    set L(id_prof_x)    40      ;# the PROFILE label, left-aligned like
+                                ;# the LAST SHOT card's
+    set L(id_val_x)    130      ;# and its value (90 after the label,
+                                ;# the last card's own pitch)
+    set L(id_val_w)    370      ;# the full-row width the move buys
 
     # The cycler arrows are a stepper pill's size now (owner request), down
     # from 120 wide. They stay on the action row with Edit BETWEEN them: two
@@ -390,10 +438,13 @@ proc ::lumen::_init_layout {} {
     # keeps ~35px clear of the right arrow and of the block's edge.
     set L(bag_dots_x)  406 ; set L(bag_dots_y) 746
 
-    # Three columns spread evenly across 520..1116 (596 wide): 3 x 176 = 528,
-    # two 34 gaps, so a 210 pitch ending flush at 940 + 176 = 1116.
+    # 0.33.0: three columns spread evenly across 520..1300 (the full-width
+    # strip's inner edge): groups are 240 wide now (pill 44, gap 6, value
+    # 140, gap 6, pill 44 -- the value span finally fits "38.0 (1:2.0)"-
+    # class strings, the 0.21.0 complaint), 3 x 240 = 720, two 30 gaps,
+    # so a 270 pitch ending flush at 1060 + 240 = 1300.
     set L(bean_fact_x)  520
-    set L(bean_fact_w)  210        ;# column pitch
+    set L(bean_fact_w)  270        ;# column pitch
 
     # The "-" glyph renders LOW inside its pill. Measured on the tablet
     # (0.27.0): against a pill centre at y=666, the minus ink sat at 668.5 and
@@ -414,7 +465,7 @@ proc ::lumen::_init_layout {} {
     # same baseline as the cycler arrows and Edit. Both columns end at 770.
     set L(step_w)       44
     set L(step_gap)      6
-    set L(step_val_w)   76
+    set L(step_val_w)  140        ;# 0.33.0: was 76 -- see the pitch note
     set L(step_y)      642
     set L(step_h)       48
 
@@ -422,10 +473,10 @@ proc ::lumen::_init_layout {} {
     # same y as the identity block's action row.
     set L(scale_y)      722
     set L(scale_h)       48
-    set L(scale_read_x) 520 ; set L(scale_read_w) 176   ;# live readout
-    set L(scale_set_x)  730 ; set L(scale_set_w)  176   ;# Set dose button
-    set L(act_scan_x)   940                             ;# Scan bag
-    set L(act_w)        176 ; set L(act_h)         48
+    set L(scale_read_x) 520 ; set L(scale_read_w) 240   ;# live readout
+    set L(scale_set_x)  790 ; set L(scale_set_w)  240   ;# Set dose button
+    set L(act_scan_x)  1060                             ;# Scan bag
+    set L(act_w)        240 ; set L(act_h)         48
 
     # ---- last shot tile internals (0.23.0) ------------------------------
     #
@@ -436,34 +487,36 @@ proc ::lumen::_init_layout {} {
     set L(last_val_x)  796      ;# PROFILE value on THIS card -- NOT id_val_x,
                                 ;# which is the next-shot card's 130 and lands
                                 ;# inside the grind tile (seen on the tablet)
-    set L(last_label_y) 36
-    set L(last_prof_y)  60
-    set L(last_roast_y) 88
+    # 0.31.0: these are ABSOLUTE page y values (unlike the grind tile,
+    # whose rows hang off grind_y), so the taskbar's +48 shift is applied
+    # to every one of them here. Relative spacing is unchanged; the tile's
+    # 8px height loss comes out of the bottom clearance.
+    set L(last_label_y) 84
+    set L(last_prof_y) 108
+    set L(last_roast_y) 136
     # The last shot's bean name uses font_primary (22px), not the 40px hero:
     # 274px holds ~11 characters at 40px, which cut "Jorge Diaz Campos" to
     # "Jorge Dia...". The owner's mockup also shows this name smaller than the
     # next-shot one -- this card is a summary, that one is the control.
-    set L(last_name_y) 108
+    set L(last_name_y) 156
 
     # Four metrics on a 76 pitch: 996 + 3*76 + 76 = 1300, the tile's inner
     # edge (682 + 642 - 24).
     set L(last_met_x)  996 ; set L(last_met_pitch) 76
-    set L(last_met_label_y) 88
-    set L(last_met_val_y)  112
-    set L(last_met_sub_y)  140  ;# the derived ratio, under YIELD
+    set L(last_met_label_y) 136
+    set L(last_met_val_y)  160
+    set L(last_met_sub_y)  188  ;# the derived ratio, under YIELD
 
     # Water tank level (0.24.0), in the card's top-right corner -- the only
     # space on the page that was empty, and where every other skin puts its
     # tank indicator. It is machine status rather than shot data, so it takes
-    # the blue flow colour instead of the ink scale: it must not read as one
-    # of the four metrics beneath it.
-    #   label 36..52, value 30..56, metric labels start at 88.
-    set L(water_label_y)  36
-    set L(water_val_y)    30
+    # (0.34.0: the water readout moved to the taskbar -- it is machine
+    # status, which is what a status bar is for; the card's top-right
+    # corner is empty again.)
 
     # Shot history is a text link now, matching Curve / Shot analysis on the
     # grind tile rather than being the only button on the card.
-    set L(hist_y)      172
+    set L(hist_y)      220
 
     set L(pad_x)     24        ;# inner padding of a tile
     set L(pad_y)     20
@@ -1474,25 +1527,8 @@ proc ::lumen::data::theme_note {} {
     return [translate "Dark selected. Tap Done and the app will restart."]
 }
 
-proc ::lumen::data::smoothing_note {} {
-    if { [::lumen::chart_smoothing] eq "linear" } {
-        return [translate "Straight lines between samples, exactly as recorded."]
-    }
-    return [translate "Catmull-Rom curve through the same samples."]
-}
-
 proc ::lumen::data::version_line {} {
     return "Lumen v$::lumen::version"
-}
-
-proc ::lumen::data::smoothing_label {} {
-    if { [::lumen::chart_smoothing] eq "linear" } { return [translate "Raw"] }
-    return [translate "Smooth"]
-}
-
-proc ::lumen::data::stages_label {} {
-    if { [::lumen::stages_shown] } { return [translate "Stages"] }
-    return [translate "No stages"]
 }
 
 proc ::lumen::data::bag_count_value {} {
@@ -1562,11 +1598,95 @@ proc ::lumen::data::water_ml {} {
     return "[expr {round($ml)}] ml"
 }
 
-# Blank the label too when there is no reading, so the card does not carry a
-# lone "WATER" heading with nothing under it.
-proc ::lumen::data::water_label {} {
-    if { [water_ml] eq "" } { return "" }
-    return [translate "WATER"]
+# (0.34.0: water_label is gone with the card corner readout; the taskbar
+# shows the bare blue value, which needs no heading.)
+
+# 0.34.0 clock format preferences (Lumen settings CLOCK row). Read with
+# defaults so an unset key -- every install until now -- behaves exactly
+# as 0.31.0 did: 24-hour, day-month.
+proc ::lumen::time_format {} {
+    if { [info exists ::settings(lumen_time_format)] \
+             && $::settings(lumen_time_format) eq "12" } { return 12 }
+    return 24
+}
+
+proc ::lumen::date_format {} {
+    if { [info exists ::settings(lumen_date_format)] \
+             && $::settings(lumen_date_format) eq "mdy" } { return "mdy" }
+    return "dmy"
+}
+
+# 0.31.0 taskbar clock. Rides the app's own 200ms onscreen-variable tick
+# like every other live label (the tick only reconfigures the canvas item
+# when the substituted string CHANGES, dui.tcl:6981-6984, so this costs one
+# `clock format` per tick and one redraw per displayed minute). One
+# `clock seconds` per tick is the water readout's own precedent above.
+# Cheap, no filesystem -- per the accessor rule at the top of this section.
+proc ::lumen::data::bar_time {} {
+    if { [::lumen::time_format] == 12 } {
+        # Zero-padded on purpose: the day label sits at a fixed x, so the
+        # widest 12h time must be constant-width ("08:05 AM").
+        return [clock format [clock seconds] -format "%I:%M %p"]
+    }
+    return [clock format [clock seconds] -format "%H:%M"]
+}
+
+# Day as its own item: the time is a number and takes the mono face, the
+# day is a word and takes the sans caption -- the typography rule.
+proc ::lumen::data::bar_day {} {
+    if { [::lumen::date_format] eq "mdy" } {
+        return [clock format [clock seconds] -format "%a %b %d"]
+    }
+    return [clock format [clock seconds] -format "%a %d %b"]
+}
+
+# Live labels for the CLOCK row's two buttons: the time one names the
+# mode, the date one shows a real sample of what the bar will print.
+proc ::lumen::data::clock_time_label {} {
+    if { [::lumen::time_format] == 12 } { return "12H" }
+    return "24H"
+}
+
+proc ::lumen::data::clock_date_label {} {
+    if { [::lumen::date_format] eq "mdy" } {
+        return [clock format [clock seconds] -format "%b %d"]
+    }
+    return [clock format [clock seconds] -format "%d %b"]
+}
+
+# 0.32.0 maintenance state, for the taskbar dot. Guarded exactly like
+# grind_rec above: info procs gate, catch, dict validated, degrade to "".
+# status_summary is cache-backed on the plugin side (600s TTL plus a
+# silent after-flow invalidation), so calling it on the 200ms tick is the
+# same deal as recommendation_for_current_bag -- the plugin memoizes, the
+# skin just reads. Returns "amber", "red", or "" (ok / plugin absent /
+# anything malformed): the dot only exists to say "attention", so every
+# failure mode maps to no dot.
+proc ::lumen::data::maint_state {} {
+    if { [info procs ::plugins::MaintenanceTracker::status_summary] eq "" } { return "" }
+    if { [catch { set s [::plugins::MaintenanceTracker::status_summary] } err] } {
+        msg -ERROR "Lumen: could not read the maintenance status: $err"
+        return ""
+    }
+    if { $s eq "" || [catch { dict size $s }] } { return "" }
+    if { ![dict exists $s ok] || ![dict get $s ok] } { return "" }
+    if { ![dict exists $s state] } { return "" }
+    set st [dict get $s state]
+    if { $st in {amber red} } { return $st }
+    return ""
+}
+
+# Two stacked fixed-colour items share the dot's spot; the glyph moves
+# between them (the settings mode-line pattern -- a canvas item's -fill is
+# fixed at creation). U+25CF via format %c: the proven glyph path.
+proc ::lumen::data::maint_dot_amber {} {
+    if { [maint_state] eq "amber" } { return [format %c 0x25CF] }
+    return ""
+}
+
+proc ::lumen::data::maint_dot_red {} {
+    if { [maint_state] eq "red" } { return [format %c 0x25CF] }
+    return ""
 }
 
 proc ::lumen::data::live_weight {} {
@@ -1637,24 +1757,17 @@ proc ::lumen::data::scale_line {} {
 #  espresso_weight_chartable is 0.10 * scale weight (so 38g plots as 3.8).
 #############################################################################
 
+# 0.36.0 (owner request): the Raw/Smooth and Stages pills are gone and
+# these two are policy, not preference -- Lumen charts are always
+# smooth (Catmull-Rom through the recorded samples) with the stage
+# separators shown. These procs stay as the single source of that
+# policy for both chart builders (home + espresso page).
 proc ::lumen::chart_smoothing {} {
-    set v "linear"
-    catch { set v $::settings(live_graph_smoothing_technique) }
-    if { $v eq "" } { set v "linear" }
-    return $v
+    return "catrom"
 }
 
-# Stage separators shown? Lumen preference, default on.
 proc ::lumen::stages_shown {} {
-    set v 1
-    catch {
-        if { [info exists ::settings(lumen_chart_stages)] \
-          && $::settings(lumen_chart_stages) ne "" } {
-            set v $::settings(lumen_chart_stages)
-        }
-    }
-    if { ![string is boolean -strict $v] } { set v 1 }
-    return [expr {$v ? 1 : 0}]
+    return 1
 }
 
 # How many recent bean bags the home strip's bag cycler offers. Lumen
@@ -2074,10 +2187,6 @@ proc ::lumen::restyle_core_dialog { page } {
 proc ::lumen::chart_setup { widget } {
     variable C
     variable L
-    variable chart_widgets
-    if { [lsearch -exact $chart_widgets $widget] < 0 } {
-        lappend chart_widgets $widget
-    }
 
     set sm [chart_smoothing]
     # Line widths are physical pixels here: the graph is a Tk widget, not a
@@ -2122,29 +2231,6 @@ proc ::lumen::chart_setup { widget } {
             -linewidth 1 -subdivisions 5 -min 0
         $widget axis configure y -color $C(ink_3) -tickfont $L(font_caption) \
             -min 0 -max 10 -subdivisions 5 -majorticks {2 4 6 8 10}
-    }
-}
-
-# Re-configures the live elements rather than rebuilding the widget.
-proc ::lumen::chart_apply_smoothing {} {
-    variable chart_widgets
-    set sm [chart_smoothing]
-    foreach widget $chart_widgets {
-        foreach name {l_pressure l_flow l_weight l_temp} {
-            if { [catch { $widget element configure $name -smooth $sm } err] } {
-                msg -ERROR "Lumen: could not set smoothing on $name: $err"
-            }
-        }
-    }
-}
-
-proc ::lumen::chart_apply_stages {} {
-    variable chart_widgets
-    set hide [expr {[stages_shown] ? "no" : "yes"}]
-    foreach widget $chart_widgets {
-        if { [catch { $widget element configure l_stages -hide $hide } err] } {
-            msg -ERROR "Lumen: could not toggle the stage separators: $err"
-        }
     }
 }
 
@@ -2237,34 +2323,6 @@ proc ::lumen::act::dye_next {} {
 # through the settings page would have done, so the plugin's own navigation
 # then works unmodified. Guarded and logged: if BeanScanner ever renames it,
 # this must fail loudly rather than trap the user again.
-# The one place this skin writes a setting. live_graph_smoothing_technique is
-# a stock DE1app preference (default "linear"); "catrom" is the Catmull-Rom
-# spline the chart widget already understands. Same data, rounded corners.
-# Second chart preference, alongside smoothing: show/hide the stage
-# separator lines. lumen_chart_stages is a Lumen setting (like lumen_theme).
-proc ::lumen::act::toggle_stages {} {
-    set new [expr {[::lumen::stages_shown] ? 0 : 1}]
-    if { [catch {
-        set ::settings(lumen_chart_stages) $new
-        save_settings
-    } err] } {
-        msg -ERROR "Lumen: could not save the stages preference: $err"
-    }
-    ::lumen::chart_apply_stages
-}
-
-proc ::lumen::act::toggle_smoothing {} {
-    set new "catrom"
-    if { [::lumen::chart_smoothing] ne "linear" } { set new "linear" }
-    if { [catch {
-        set ::settings(live_graph_smoothing_technique) $new
-        save_settings
-    } err] } {
-        msg -ERROR "Lumen: could not save smoothing preference: $err"
-    }
-    ::lumen::chart_apply_smoothing
-}
-
 # Theme is read once at load and every page is built from it, so switching
 # needs the app restarted. The tap only records the choice; Done performs the
 # restart (::lumen::act::restart_for_theme).
@@ -2288,6 +2346,29 @@ proc ::lumen::act::toggle_theme {} {
 proc ::lumen::act::open_settings {} {
     if { [catch { dui page load lumen_settings } err] } {
         msg -ERROR "Lumen: could not open Lumen settings: $err"
+    }
+}
+
+# 0.34.0 clock format toggles (CLOCK row). Same persist-or-log contract
+# as the theme toggle above; the taskbar picks the change up on its next
+# 200ms tick -- no restart, unlike the theme.
+proc ::lumen::act::toggle_time_format {} {
+    set new [expr {[::lumen::time_format] == 24 ? "12" : "24"}]
+    if { [catch {
+        set ::settings(lumen_time_format) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the time format: $err"
+    }
+}
+
+proc ::lumen::act::toggle_date_format {} {
+    set new [expr {[::lumen::date_format] eq "dmy" ? "mdy" : "dmy"}]
+    if { [catch {
+        set ::settings(lumen_date_format) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the date format: $err"
     }
 }
 
@@ -2684,6 +2765,22 @@ proc ::lumen::act::open_grind_advisor {} {
     }
 }
 
+# Opens the Maintenance Tracker's card list from the taskbar wrench
+# (0.32.0). Same contract as the two shortcuts above: open_page is the
+# plugin's public entry, its settings page captures the page it was opened
+# from by itself (the home page is "off", which its transient-name filter
+# accepts), so Done returns straight here with no bookkeeping on our side.
+proc ::lumen::act::open_maintenance {} {
+    if { [catch {
+        if { [info procs ::plugins::MaintenanceTracker::open_page] eq "" } {
+            error "the Maintenance Tracker plugin is not loaded"
+        }
+        ::plugins::MaintenanceTracker::open_page MaintenanceTracker_settings
+    } err] } {
+        msg -ERROR "Lumen: could not open the Maintenance Tracker: $err"
+    }
+}
+
 # Cycles the next shot's bean bag through the most recent bags.
 #
 # Read and write both go through OTHER PLUGINS' public APIs. Lumen opens no
@@ -2886,10 +2983,21 @@ proc ::lumen::var { page x y code args } {
 #  * Tk canvas has no alpha, and faking it was a mistake: 0.29.0 shipped
 #    -stipple gray25, a raw 4x4 checkerboard that the owner read as "a
 #    graphics bug" -- on a high-DPI panel a pixel mesh over the button
-#    looks like corruption, not translucency. 0.29.1 draws a hollow accent
-#    RING instead: a crisp crema outline in the control's rounded shape,
-#    slightly inset, like a focus ring. No fill means the button's own
-#    label stays fully visible under the flash.
+#    looks like corruption, not translucency. 0.29.1 drew a hollow accent
+#    RING instead, which looked right on baked pills but drew a floating
+#    empty rectangle around TEXT-LINK controls (Shot history, Curve...) --
+#    owner report, 0.36.0. Now the flash is a FILLED crema-tinted chip
+#    with a thin crema border, and it is LOWERED beneath the control's
+#    own label: a chip materialises behind the text like a real pressed
+#    button, on pills and text links alike.
+#  * The lowering trick: canvas items stack in creation order, so the
+#    fresh flash lands on top of the label it must sit under. The zone's
+#    overlapping items (bottom -> top) start at the baked background;
+#    the flash is lowered to just below the LOWEST visible text item in
+#    the zone -- above the baked background and pills, below every
+#    label. If no visible text overlaps (never in practice -- every
+#    control's face is a text or glyph item), it stays on top, which
+#    only costs covering nothing.
 #  * `update idletasks` before returning, or the command that follows
 #    (which may open a page or query a plugin) would run to completion
 #    before the canvas ever painted the flash -- feedback after the fact
@@ -2898,44 +3006,128 @@ proc ::lumen::var { page x y code args } {
 #    drumming on a stepper reads as one live glow, not a stack of stale
 #    ones. The 150ms timer clears it by item id; a flash that outlives an
 #    instant page switch dies on the same timer.
-proc ::lumen::press_flash { x1 y1 x2 y2 } {
+# Rounded-rect point list for the flash polygons, shared by all styles.
+proc ::lumen::_flash_pts { px1 py1 px2 py2 r } {
+    if { $r * 2 > ($px2 - $px1) } { set r [expr {($px2 - $px1) / 2}] }
+    if { $r * 2 > ($py2 - $py1) } { set r [expr {($py2 - $py1) / 2}] }
+    return [list \
+        [expr {$px1 + $r}] $py1 \
+        [expr {$px2 - $r}] $py1 \
+        $px2 $py1 \
+        $px2 [expr {$py1 + $r}] \
+        $px2 [expr {$py2 - $r}] \
+        $px2 $py2 \
+        [expr {$px2 - $r}] $py2 \
+        [expr {$px1 + $r}] $py2 \
+        $px1 $py2 \
+        $px1 [expr {$py2 - $r}] \
+        $px1 [expr {$py1 + $r}] \
+        $px1 $py1]
+}
+
+# 0.37.0 (owner picked "Option B" from the press-flash samples): the
+# flash is a NEUTRAL chip that fits what you actually see, not the tap
+# zone, in three per-zone styles declared at the tap site:
+#
+#   zone   (default) chip over the whole zone -- correct for every
+#          control whose zone IS its drawn bounds (baked pills,
+#          steppers, taskbar glyphs, Done...). Raised glass_2 fill with
+#          a glass_brd hairline, lowered beneath the control's label,
+#          stepped to C(glass) at 90ms -- a press, not a highlighter.
+#   label  chip fitted to the control's VISIBLE text: the bboxes of the
+#          visible text items inside the zone, unioned, padded 10x6
+#          design px and clamped to the zone. For the text links (Shot
+#          history, Curve, Shot analysis, the PROFILE row, the
+#          steam/water mode line) whose padded zones are much bigger
+#          than the words -- the 0.36.0 "yellow rectangle" report.
+#   ring <x y w h>  crema hairline around the CONTAINER the zone is
+#          part of (design px -- the grind card), for card-sized zones
+#          where a filled chip would flood the tile.
+#
+# Still no alpha anywhere: flat palette tones, one shared tag, 150ms.
+proc ::lumen::press_flash { x1 y1 x2 y2 {style zone} } {
     variable C
     if { [catch {
         .can delete lumen_tapflash
+        set kind [lindex $style 0]
+
+        if { $kind eq "ring" } {
+            lassign $style - rx ry rw rh
+            set px1 [rescale_x_skin [X $rx]]
+            set py1 [rescale_y_skin [Y $ry]]
+            set px2 [rescale_x_skin [X [expr {$rx + $rw}]]]
+            set py2 [rescale_y_skin [Y [expr {$ry + $rh}]]]
+            # The cards' baked corner radius is 24 design px; the smooth
+            # polygon renders ~half its control-point radius, so feed
+            # double (0.37.1, same correction as the chip).
+            set pts [_flash_pts $px1 $py1 $px2 $py2 [rescale_y_skin 96]]
+            set lw [expr {int(max(2, [rescale_y_skin 4]))}]
+            set id [.can create polygon {*}$pts -smooth 1 \
+                -fill "" -outline $C(crema) -width $lw \
+                -tags lumen_tapflash]
+            after 150 [list catch [list .can delete $id]]
+            update idletasks
+            return
+        }
+
         set px1 [rescale_x_skin $x1] ; set py1 [rescale_y_skin $y1]
         set px2 [rescale_x_skin $x2] ; set py2 [rescale_y_skin $y2]
-        # 0.30.0 (owner feedback on 0.29.1): the ring matches the CONTROL.
-        # Inset is 1px -- just enough that the stroke is not clipped at the
-        # zone boundary -- because the stepper pills' tap zones ARE their
-        # drawn bounds, and a 5px-inset ring floated visibly inside them.
-        # The radius is the baked pills' own corner radius (RADIUS_S = 16
-        # design px in make_backgrounds.py, doubled to virtual, then
-        # rescaled), so on a pill the ring's corners follow the pill's
-        # corners exactly; the half-size clamp below keeps it sane on
-        # thinner zones.
-        set inset [expr {int(max(1, [rescale_y_skin 2]))}]
+
+        if { $kind eq "label" } {
+            # Union the visible text bboxes inside the zone.
+            set bx1 ""
+            foreach it [.can find overlapping $px1 $py1 $px2 $py2] {
+                if { [.can type $it] ne "text" } { continue }
+                if { [.can itemcget $it -state] eq "hidden" } { continue }
+                lassign [.can bbox $it] tx1 ty1 tx2 ty2
+                if { $bx1 eq "" } {
+                    set bx1 $tx1 ; set by1 $ty1 ; set bx2 $tx2 ; set by2 $ty2
+                } else {
+                    if { $tx1 < $bx1 } { set bx1 $tx1 }
+                    if { $ty1 < $by1 } { set by1 $ty1 }
+                    if { $tx2 > $bx2 } { set bx2 $tx2 }
+                    if { $ty2 > $by2 } { set by2 $ty2 }
+                }
+            }
+            if { $bx1 ne "" } {
+                # Pad, then clamp back into the zone so the chip can
+                # never outgrow the tap target.
+                set padx [rescale_x_skin 20] ; set pady [rescale_y_skin 12]
+                set px1 [expr {max($px1, $bx1 - $padx)}]
+                set py1 [expr {max($py1, $by1 - $pady)}]
+                set px2 [expr {min($px2, $bx2 + $padx)}]
+                set py2 [expr {min($py2, $by2 + $pady)}]
+            }
+            # No visible text in the zone: fall through as a zone chip.
+        }
+
+        # 0.37.1 (owner report: the chip's sharper corners poked past the
+        # pills' rounded edges). Two corrections: a 3-design-px inset so
+        # the chip sits INSIDE the drawn control, and an over-provisioned
+        # corner radius -- a -smooth 1 polygon renders roughly HALF the
+        # curvature of its control-point radius, so matching the pills'
+        # 16-design-px arc needs ~28 design px fed to the point list (the
+        # half-size clamp in _flash_pts keeps small chips pill-ended).
+        set inset [expr {int(max(2, [rescale_y_skin 6]))}]
         set px1 [expr {$px1 + $inset}] ; set py1 [expr {$py1 + $inset}]
         set px2 [expr {$px2 - $inset}] ; set py2 [expr {$py2 - $inset}]
-        set r [rescale_y_skin 32]
-        if { $r * 2 > ($px2 - $px1) } { set r [expr {($px2 - $px1) / 2}] }
-        if { $r * 2 > ($py2 - $py1) } { set r [expr {($py2 - $py1) / 2}] }
-        set pts [list \
-            [expr {$px1 + $r}] $py1 \
-            [expr {$px2 - $r}] $py1 \
-            $px2 $py1 \
-            $px2 [expr {$py1 + $r}] \
-            $px2 [expr {$py2 - $r}] \
-            $px2 $py2 \
-            [expr {$px2 - $r}] $py2 \
-            [expr {$px1 + $r}] $py2 \
-            $px1 $py2 \
-            $px1 [expr {$py2 - $r}] \
-            $px1 [expr {$py1 + $r}] \
-            $px1 $py1]
-        set lw [expr {int(max(3, [rescale_y_skin 6]))}]
+        set pts [_flash_pts $px1 $py1 $px2 $py2 [rescale_y_skin 56]]
+        set lw [expr {int(max(1, [rescale_y_skin 2]))}]
         set id [.can create polygon {*}$pts -smooth 1 \
-            -fill "" -outline $C(crema) -width $lw \
+            -fill $C(glass_2) -outline $C(glass_brd) -width $lw \
             -tags lumen_tapflash]
+        # Lower the filled chip beneath the control's label: find the
+        # lowest visible text item in the zone and slide the flash just
+        # below it (canvas items stack in creation order).
+        foreach it [.can find overlapping $px1 $py1 $px2 $py2] {
+            if { $it == $id } { continue }
+            if { [.can type $it] eq "text" \
+                    && [.can itemcget $it -state] ne "hidden" } {
+                .can lower $id $it
+                break
+            }
+        }
+        after 90 [list catch [list .can itemconfigure $id -fill $C(glass)]]
         after 150 [list catch [list .can delete $id]]
         update idletasks
     } err] } {
@@ -2943,11 +3135,11 @@ proc ::lumen::press_flash { x1 y1 x2 y2 } {
     }
 }
 
-proc ::lumen::tap { page x y w h command label } {
+proc ::lumen::tap { page x y w h command label {style zone} } {
     set x1 [X $x] ; set y1 [Y $y]
     set x2 [X [expr {$x + $w}]] ; set y2 [Y [expr {$y + $h}]]
     add_de1_button $page \
-        "::lumen::press_flash $x1 $y1 $x2 $y2; say \[translate {$label}\] \$::settings(sound_button_in); $command" \
+        "::lumen::press_flash $x1 $y1 $x2 $y2 [list $style]; say \[translate {$label}\] \$::settings(sound_button_in); $command" \
         $x1 $y1 $x2 $y2
 }
 
@@ -3015,6 +3207,60 @@ proc ::lumen::build_home {} {
     # grid in the next-shot strip.
 
     ####################################################################
+    #  Taskbar (0.31.0 geometry + time; 0.32.0 tappables + dot)
+    #
+    #  Sits naked on the baked gradient -- no glass pill, so the bar
+    #  bakes nothing. Time/day pinned left; four tappables grouped right
+    #  in escalating consequence toward the corner: maintenance (wrench,
+    #  with the amber/red state dot), Lumen settings (gear), app settings
+    #  (sliders), Sleep (moon). The side panel still duplicates Settings
+    #  and Sleep until this bar is tablet-verified -- pass 3 resolves it.
+    #
+    #  Icon glyphs come from the app's own FA6 Pro font (F(symbol), the
+    #  scale_bt precedent), as [format %c ...] escapes -- never literal
+    #  UTF-8 (mangling trap). If the font failed to register, short
+    #  letter labels stand in so nothing renders as a tofu box.
+    ####################################################################
+    set bar_mid [expr {$L(bar_y) + $L(bar_h) / 2.0}]
+    var $p $L(bar_time_x) $bar_mid {[::lumen::data::bar_time]} \
+        -font $L(font_data) -fill $C(ink) -anchor w -justify left
+    var $p $L(bar_day_x) $bar_mid {[::lumen::data::bar_day]} \
+        -font $L(font_caption) -fill $C(ink_3) -anchor w -justify left
+
+    # 0.34.0: the wordmark, dead centre -- passive, muted, not a tap.
+    txt $p $L(bar_title_x) $bar_mid "Lumen" \
+        -font $L(font_button) -fill $C(ink_3) -anchor center -justify center
+
+    # 0.34.0: the water readout, moved here from the last-shot card's
+    # corner -- machine status belongs on the status bar. Same accessor,
+    # same blue, blank when the machine has not reported recently.
+    var $p $L(bar_water_x) $bar_mid {[::lumen::data::water_ml]} \
+        -font $L(font_data) -fill $C(c_flow) -anchor e -justify right
+
+    set sym_ok [_font_family_ok symbol]
+    set bar_font [expr {$sym_ok ? $L(font_bt) : $L(font_label)}]
+    foreach {xkey glyph fallback action label} [list \
+        bar_wrench_x  0xF0AD "MNT" {::lumen::act::open_maintenance}  "Maintenance" \
+        bar_gear_x    0xF013 "SET" {::lumen::act::open_settings}     "Settings" \
+        bar_sliders_x 0xF1DE "APP" {::lumen::act::open_app_settings} "App settings" \
+        bar_moon_x    0xF186 "ZZZ" {start_sleep}                     "Sleep" ] {
+        set ix $L($xkey)
+        txt $p [expr {$ix + $L(bar_icon_w) / 2.0}] $bar_mid \
+            [expr {$sym_ok ? [format %c $glyph] : $fallback}] \
+            -font $bar_font -fill $C(ink_2) -anchor center -justify center
+        tap $p $ix $L(bar_y) $L(bar_icon_w) $L(bar_h) $action $label
+    }
+
+    # Maintenance state dot: two stacked fixed-colour items, the glyph
+    # moves between them (settings mode-line pattern; a canvas item's
+    # -fill is fixed at creation). Both blank when all is well, when the
+    # plugin is absent, or when anything about the read is off.
+    var $p $L(bar_dot_x) $L(bar_dot_y) {[::lumen::data::maint_dot_amber]} \
+        -font $L(font_caption) -fill $C(warn) -anchor center -justify center
+    var $p $L(bar_dot_x) $L(bar_dot_y) {[::lumen::data::maint_dot_red]} \
+        -font $L(font_caption) -fill $C(danger) -anchor center -justify center
+
+    ####################################################################
     #  Grind recommendation tile  ->  GrindAdvisor result popup
     ####################################################################
     glass $p $L(grind_x) $L(grind_y) $L(grind_w) $L(grind_h) \
@@ -3064,26 +3310,33 @@ proc ::lumen::build_home {} {
         [translate "Curve"] -font $L(font_caption) -fill $C(crema) \
         -anchor ne -justify right
 
-    # The tile tap is carved into three rectangles around the Curve target, so
-    # no two tap targets overlap (design-system rule) and every part of the
-    # tile that used to open the popup still does.
+    # The tile tap is carved into three rectangles around the Curve target,
+    # so no two tap targets overlap (design-system rule).
     #   A: everything above the bottom row
     #   B: bottom row, left of Curve      C: bottom row, right of Curve
+    # 0.36.0 (owner request): the CARD (zones A and B) opens Grind
+    # Advisor's SETTINGS -- the same open_grind_advisor the Lumen
+    # settings page's GRIND ADVISOR row used to call (that row is gone).
+    # Zone C keeps the "Shot analysis" result popup, whose text link
+    # lives inside it, and Curve is unchanged.
     set gcv_x [expr {$gcv_r - 84}]                  ;# Curve tap left edge
     set gcv_y [expr {$L(grind_y) + $L(grind_h) - 62}]
     set gcv_w 90
     set gcv_h 62
 
+    # Flash styles (0.37.0): the two card-body zones ring the CARD, the
+    # two text links get label-fitted chips.
+    set card_ring [list ring $L(grind_x) $L(grind_y) $L(grind_w) $L(grind_h)]
     tap $p $L(grind_x) $L(grind_y) $L(grind_w) \
         [expr {$gcv_y - $L(grind_y) - $L(xs)}] \
-        {::lumen::act::grind_popup} "Shot analysis"
+        {::lumen::act::open_grind_advisor} "Grind Advisor" $card_ring
     tap $p $L(grind_x) $gcv_y [expr {$gcv_x - $L(grind_x)}] $gcv_h \
-        {::lumen::act::grind_popup} "Shot analysis"
+        {::lumen::act::open_grind_advisor} "Grind Advisor" $card_ring
     tap $p [expr {$gcv_x + $gcv_w}] $gcv_y \
         [expr {$L(grind_x) + $L(grind_w) - $gcv_x - $gcv_w}] $gcv_h \
-        {::lumen::act::grind_popup} "Shot analysis"
+        {::lumen::act::grind_popup} "Shot analysis" label
 
-    tap $p $gcv_x $gcv_y $gcv_w $gcv_h {::lumen::act::grind_curve} "Curve"
+    tap $p $gcv_x $gcv_y $gcv_w $gcv_h {::lumen::act::grind_curve} "Curve" label
 
     ####################################################################
     #  Last shot tile
@@ -3111,14 +3364,7 @@ proc ::lumen::build_home {} {
     var $p $lx $L(last_name_y) {[::lumen::data::last_name_line]} \
         -font $L(font_primary) -fill $C(ink) -width $L(last_id_w)
 
-    # --- Water in the tank (0.24.0), above the metrics in the card's
-    # top-right corner. Blue, not the ink scale: it is machine status, and at
-    # this size in ink it would read as a fifth shot metric.
-    var $p $L(last_met_x) $L(water_label_y) {[::lumen::data::water_label]} \
-        -font $L(font_label) -fill $C(ink_3)
-    var $p [expr {$L(last_x) + $L(last_w) - $L(pad_x)}] $L(water_val_y) \
-        {[::lumen::data::water_ml]} \
-        -font $L(font_data) -fill $C(c_flow) -anchor ne -justify right
+    # (0.34.0: the water readout moved from this corner to the taskbar.)
 
     # Metrics: GRIND joins dose/yield/time (0.23.0), with the derived ratio
     # tucked under YIELD exactly as the next-shot card does it.
@@ -3145,7 +3391,7 @@ proc ::lumen::build_home {} {
     txt $p $lh_r $L(hist_y) [translate "Shot history"] \
         -font $L(font_caption) -fill $C(crema) -anchor ne -justify right
     tap $p [expr {$lh_r - 150}] [expr {$L(hist_y) - 8}] 150 40 \
-        {::lumen::act::shot_history} "Shot history"
+        {::lumen::act::shot_history} "Shot history" label
 
     ####################################################################
     #  Shot chart   (real graph widget added in Pass 3)
@@ -3166,25 +3412,9 @@ proc ::lumen::build_home {} {
         incr i
     }
 
-    # Raw / Smooth toggle top right of the chart panel, with the stage
-    # separators toggle beside it -- same pill, same behaviour.
-    set tw 140
-    set tx [expr {$L(chart_x) + $L(chart_w) - $L(pad_x) - $tw}]
-    set ty [expr {$L(chart_y) + 12}]
-    glass $p $tx $ty $tw 34 -radius 17 \
-        -fill $C(crema_lo) -outline $C(crema_brd) -spec 0
-    var $p [expr {$tx + $tw / 2.0}] [expr {$ty + 17}] \
-        {[::lumen::data::smoothing_label]} \
-        -font $L(font_label) -fill $C(crema) -anchor center -justify center
-    tap $p $tx $ty $tw 34 {::lumen::act::toggle_smoothing} "Smoothing"
-
-    set tx2 [expr {$tx - $tw - 12}]
-    glass $p $tx2 $ty $tw 34 -radius 17 \
-        -fill $C(crema_lo) -outline $C(crema_brd) -spec 0
-    var $p [expr {$tx2 + $tw / 2.0}] [expr {$ty + 17}] \
-        {[::lumen::data::stages_label]} \
-        -font $L(font_label) -fill $C(crema) -anchor center -justify center
-    tap $p $tx2 $ty $tw 34 {::lumen::act::toggle_stages} "Stages"
+    # 0.36.0 (owner request): the Raw/Smooth and Stages pills are gone --
+    # the chart is always smooth with stage separators shown. The pills
+    # were also removed from the baked background (make_backgrounds.py).
 
     # The graph widget itself, below the legend row.
     set cgx [expr {$L(chart_x) + $L(pad_x)}]
@@ -3220,16 +3450,21 @@ proc ::lumen::build_home {} {
     set bx2 $L(bean_id_x)
     set by2 [expr {$L(bean_y) + $L(pad_y)}]
 
-    # 0.27.0 identity block. NEXT SHOT and PROFILE share the top row -- the
-    # label only ever used the left third of it -- and the 24px that frees
-    # goes into even 11px gaps around the hero name, which was wedged between
-    # two lines 4px away.
+    # 0.35.0 identity block: NEXT SHOT on its own line, PROFILE on the
+    # row beneath it -- the LAST SHOT card's exact stacked order (owner
+    # request; the two cards read as a pair again). The dedicated row
+    # also gives the profile value the block's full width instead of the
+    # 255 it had sharing the label row.
     txt $p $bx2 $L(id_label_y) [translate "NEXT SHOT"] \
         -font $L(font_label) -fill $C(ink_3)
-    txt $p $L(id_prof_x) $L(id_label_y) [translate "PROFILE"] \
+    txt $p $L(id_prof_x) $L(id_prof_y) [translate "PROFILE"] \
         -font $L(font_label) -fill $C(ink_3)
-    var $p $L(id_val_x) $L(id_label_y) {[::lumen::data::next_profile]} \
+    var $p $L(id_val_x) $L(id_prof_y) {[::lumen::data::next_profile]} \
         -font $L(font_caption) -fill $C(ink_2) -width $L(id_val_w)
+    # The profile chooser tap (0.33.0, moved with the row in 0.35.0):
+    # same open_profiles the old side-panel button called.
+    tap $p $L(id_prof_tap_x) $L(id_prof_tap_y) $L(id_prof_tap_w) $L(id_prof_tap_h) \
+        {::lumen::act::open_profiles} "Profile" label
 
     var $p $bx2 $L(id_roast_y) {[::lumen::data::bean_roaster_line]} \
         -font $L(font_caption) -fill $C(ink_3) -width $L(bean_id_w)
@@ -3382,31 +3617,10 @@ proc ::lumen::build_home {} {
     tap $p $L(act_scan_x) $L(scale_y) $L(act_w) $L(act_h) \
         {::lumen::act::scan_bag} "Scan bag"
 
-    ####################################################################
-    #  Side panel: Profile, Settings and Sleep, in their own panel right of
-    #  the strip. Settings and Sleep moved here from the removed rail;
-    #  without them the skin is a dead end with no way back to the skin
-    #  picker. Profile joined them in 0.24.0 -- it is the one thing you
-    #  change between shots that the strip could not reach at all.
-    #
-    #  Profile is on top because it is the one you tap during a session;
-    #  Sleep stays at the bottom, furthest from a stray thumb.
-    ####################################################################
-    glass $p $L(side_x) $L(bean_y) $L(side_w) $L(bean_h)
-
-    foreach {gy label action} [list \
-        $L(side_y1) "Profile"  {::lumen::act::open_profiles} \
-        $L(side_y2) "Settings" {::lumen::act::open_settings} \
-        $L(side_y3) "Sleep"    {start_sleep} ] {
-        glass $p $L(side_btn_x) $gy $L(side_btn_w) $L(side_btn_h) \
-            -radius $L(radius_sm) -spec 0
-        txt $p [expr {$L(side_btn_x) + $L(side_btn_w) / 2.0}] \
-            [expr {$gy + $L(side_btn_h) / 2.0}] \
-            [translate $label] -font $L(font_button) -fill $C(ink_2) \
-            -anchor center -justify center
-        tap $p $L(side_btn_x) $gy $L(side_btn_w) $L(side_btn_h) \
-            $action $label
-    }
+    # 0.33.0: the side panel is gone. Settings and Sleep are on the
+    # taskbar (tablet-verified in 0.32.0 before the panel was removed --
+    # the skin was never left without a way back to the skin picker), and
+    # Profile is the tap on the identity row's PROFILE value above.
 }
 
 #############################################################################
@@ -3583,7 +3797,7 @@ proc ::lumen::settings_dual_row { p x y w label active_code other_code \
     # are the same action, and one target cannot be mis-hit the way two 60px
     # ones side by side can.
     tap $p [expr {$x + $L(pad_x)}] [expr {$y + 40}] \
-        $L(set_mode_w) $L(set_mode_h) $toggle_cmd $what
+        $L(set_mode_w) $L(set_mode_h) $toggle_cmd $what label
 
     set gx [expr {$x + $w - $L(pad_x) - (2 * $sw + 2 * $sg + $svw)}]
     set gy [expr {$y + ($rh - $sh) / 2}]
@@ -3608,38 +3822,9 @@ proc ::lumen::settings_dual_row { p x y w label active_code other_code \
         -font $L(font_caption) -fill $C(ink_3) -anchor center -justify center
 }
 
-# One settings row whose control is a single button.
-proc ::lumen::settings_button_row { p x y w label caption btn_label \
-                                    command what bw bh args } {
-    variable C
-    variable L
-
-    array set o [list -fill $C(glass_2) -outline $C(glass_brd) \
-                      -ink $C(ink) -caption_w 220]
-    array set o $args
-
-    set rh $L(set_row_h)
-
-    glass $p $x $y $w $rh
-    txt $p [expr {$x + $L(pad_x)}] [expr {$y + 26}] $label \
-        -font $L(font_label) -fill $C(ink_3)
-    if { $caption ne "" } {
-        txt $p [expr {$x + $L(pad_x)}] [expr {$y + 56}] $caption \
-            -font $L(font_caption) -fill $C(ink_2) -width $o(-caption_w)
-    }
-
-    set bx [expr {$x + $w - $L(pad_x) - $bw}]
-    set by [expr {$y + ($rh - $bh) / 2}]
-    glass $p $bx $by $bw $bh -radius $L(radius_sm) \
-        -fill $o(-fill) -outline $o(-outline)
-    if { $btn_label ne "" } {
-        txt $p [expr {$bx + $bw / 2.0}] [expr {$by + $bh / 2.0}] \
-            [translate $btn_label] -font $L(font_button) -fill $o(-ink) \
-            -anchor center -justify center
-    }
-    tap $p $bx $by $bw $bh $command $what
-    return [list $bx $by]
-}
+# (0.36.0: settings_button_row is gone with its last caller, the GRIND
+# ADVISOR row -- the grind card on the home page opens those settings
+# now. Resurrect it from git/an archive if a button row returns.)
 
 proc ::lumen::build_settings {} {
     variable C
@@ -3652,21 +3837,17 @@ proc ::lumen::build_settings {} {
         -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
 
     ####################################################################
-    #  Two columns of four rows:
+    #  Two columns:
     #
     #    left  170..630 : BREW / STEAM / FLUSH / HOT WATER  (machine)
-    #    right 670..1170: THEME / BAGS TO CYCLE / GRIND ADVISOR / DECENT APP
+    #    right 670..1170: THEME / BAGS TO CYCLE / CLOCK
     #
-    #  0.24.0 moved DECENT APP to the BOTTOM RIGHT (owner request). It was
-    #  the second row of the right column; the two preference rows moved up
-    #  to take its place and GRIND ADVISOR sits above it, so the page ends
-    #  on the two "Open" doors with the emphasised one in the corner. The
-    #  left column is untouched -- it is the machine column, and all four
-    #  of its steppers stay together.
-    #
-    #  Rows at 110, 244, 378, 512, so both columns end at 630 -- 60 clear
-    #  above Done at 690. No Chart lines row: the chart's own Stages / Raw
-    #  pills already cover that (owner note).
+    #  0.36.0 (owner request): the GRIND ADVISOR row is GONE -- tapping
+    #  the grind card on the home page opens those settings now -- and
+    #  CLOCK moved up into its slot, so the right column is three rows
+    #  ending at 496. The left column is untouched -- it is the machine
+    #  column, and all four of its steppers stay together. Rows on the
+    #  same 110/244/378/512 grid as ever (left uses all four).
     ####################################################################
     set lx $L(set_col_l) ; set lw $L(set_col_l_w)
     set rx $L(set_col_r) ; set rw $L(set_col_r_w)
@@ -3748,19 +3929,36 @@ proc ::lumen::build_settings {} {
         {[::lumen::data::bag_count_value]} \
         -font $L(font_data) -fill $C(ink) -anchor center -justify center
 
-    # GRIND ADVISOR. Plain glass rather than accent: DECENT APP below is the
-    # one emphasised door on this page and two accent buttons would compete.
-    settings_button_row $p $rx $ry3 $rw [translate "GRIND ADVISOR"] \
-        [translate "Target time, rounding, history and curve."] \
-        "Open" {::lumen::act::open_grind_advisor} "Grind Advisor" 200 64
-
-    # DECENT APP, bottom right (owner request) -- the door to everything
-    # else, so it takes the accent and the last word on the page.
-    settings_button_row $p $rx $ry4 $rw [translate "DECENT APP"] \
-        [translate "Machine, profiles, plugins, firmware and everything else."] \
-        "Open" {::lumen::act::open_app_settings} "App settings" 200 64 \
-        -fill $C(crema_lo) -outline $C(crema_brd) -ink $C(crema) \
-        -caption_w 240
+    # CLOCK (0.34.0), third row since 0.36.0 -- it moved up into the
+    # GRIND ADVISOR row's slot when that row was removed (the grind card
+    # on the home page opens Grind Advisor's settings now). Two
+    # live-labelled raised buttons on the THEME-row pattern: date sample
+    # left, time mode right. Both apply on the next taskbar tick -- no
+    # restart.
+    glass $p $rx $ry3 $rw $L(set_row_h)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry3 + 26}] [translate "CLOCK"] \
+        -font $L(font_label) -fill $C(ink_3)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry3 + 56}] \
+        [translate "Taskbar time and date format."] \
+        -font $L(font_caption) -fill $C(ink_2) -width 190
+    set ck_bh 56
+    set ck_by [expr {$ry3 + ($L(set_row_h) - $ck_bh) / 2}]
+    set ck_time_w 110
+    set ck_date_w 130
+    set ck_time_x [expr {$rx + $rw - $L(pad_x) - $ck_time_w}]
+    set ck_date_x [expr {$ck_time_x - 12 - $ck_date_w}]
+    glass $p $ck_date_x $ck_by $ck_date_w $ck_bh -radius $L(radius_sm) -fill $C(glass_2)
+    var $p [expr {$ck_date_x + $ck_date_w / 2.0}] [expr {$ck_by + $ck_bh / 2.0}] \
+        {[::lumen::data::clock_date_label]} \
+        -font $L(font_button) -fill $C(ink) -anchor center -justify center
+    tap $p $ck_date_x $ck_by $ck_date_w $ck_bh \
+        {::lumen::act::toggle_date_format} "Date format"
+    glass $p $ck_time_x $ck_by $ck_time_w $ck_bh -radius $L(radius_sm) -fill $C(glass_2)
+    var $p [expr {$ck_time_x + $ck_time_w / 2.0}] [expr {$ck_by + $ck_bh / 2.0}] \
+        {[::lumen::data::clock_time_label]} \
+        -font $L(font_button) -fill $C(ink) -anchor center -justify center
+    tap $p $ck_time_x $ck_by $ck_time_w $ck_bh \
+        {::lumen::act::toggle_time_format} "Time format"
 
     set dw $L(set_done_w) ; set dh $L(set_done_h)
     set dx [expr {$L(center_x) - $dw / 2}]

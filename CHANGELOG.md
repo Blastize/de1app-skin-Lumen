@@ -1,5 +1,275 @@
 # Changelog — Lumen
 
+## 0.37.1 — the chip stays inside the button and matches its corners
+
+**Safety status: unchanged. Two numbers in press_flash.**
+
+Owner report on 0.37.0: the zone chip read slightly larger than the
+pill with sharper corners, overlapping the button's rounded edge. Root
+cause: a `-smooth 1` canvas polygon renders roughly HALF the curvature
+of its control-point radius, so the chip's nominal 16-design-px corners
+rendered sharper than the pills' true 16px arcs — and at a 1px inset
+the sharp corners poked outside. Fixes: inset 1 → 3 design px (the
+chip now sits inside the control) and the corner control radius
+over-provisioned to ~28 design px so the RENDERED curve matches the
+pills (the half-size clamp keeps small chips pill-ended). The card
+ring got the same correction (48 → 96 virtual control radius for its
+24px baked corners). Lesson for any future smoothed-polygon "rounded
+rect": feed ~double the target radius.
+
+## 0.37.0 — press flash Option B: a chip that fits what you see
+
+**Safety status: unchanged. Flash mechanics only; no bake, no settings
+writes.**
+
+Owner reviewed the 0.36.0 flash on-device ("still a yellow rectangle
+that don't fit"), picked Option B from the interactive sample page. The
+root problem was that the flash painted the TAP ZONE, which on the grind
+card and the text links is far bigger than the visible control.
+
+- `::lumen::tap` gains a per-zone STYLE (default `zone`), passed through
+  to `press_flash`:
+  - **zone** — neutral chip over the whole zone: `glass_2` fill,
+    `glass_brd` hairline, lowered beneath the control's label, stepped
+    to `glass` at 90 ms. Right for every control whose zone IS its
+    drawn bounds: baked pills, steppers, taskbar glyphs, Done, THEME,
+    CLOCK... (all 30 of them keep the default).
+  - **label** — chip fitted to the control's VISIBLE text: the visible
+    text items inside the zone are unioned via `.can bbox`, padded
+    10x6 design px, clamped to the zone. Applied to the five text-y
+    zones: Shot history, Curve, Shot analysis, the PROFILE identity
+    row, and the steam/water mode line. Falls back to the zone chip if
+    no text is found.
+  - **ring x y w h** — hollow crema hairline around the CONTAINER the
+    zone belongs to, in design px. Applied to the grind card's two
+    body zones, which now ring the whole card (its real drawn edge, 24
+    design-px corners) instead of flooding it.
+- The crema-filled zone chip of 0.36.0 is gone; crema now appears only
+  as the card ring. Chip corners stay the pills' RADIUS_S.
+- Harness section L rewritten: the coords-match pattern accepts the
+  style word, and `_flash_case` drives all three styles against a
+  context-aware canvas stub (bbox/type/state), asserting the zone chip
+  fills the zone, the label chip hugs the stubbed text bbox, the ring
+  is hollow on the exact card rect, and all three keep the shared tag,
+  the clear-first rule and the 150 ms delete. Both harnesses green.
+
+## 0.36.0 — chart pills gone, press flash is a chip, grind card opens Grind Advisor
+
+**Safety status: unchanged — Lumen still opens no database and writes
+no history file. This version REMOVES two settings writes (the
+smoothing and stages toggles are gone). Home + settings backgrounds
+re-baked.**
+
+Owner's three fixes, one pass:
+
+- **Stages and Raw/Smooth pills removed from the chart** (both the tap
+  zones and the baked pills). The chart is now always smooth
+  (Catmull-Rom) with stage separators shown — `chart_smoothing` /
+  `stages_shown` became the fixed policy both chart builders read.
+  Deleted with them: the two toggle actions, the smoothing/stages label
+  accessors, the orphaned `smoothing_note`, `chart_apply_smoothing` /
+  `chart_apply_stages` and the `chart_widgets` registry they iterated.
+  `live_graph_smoothing_technique` and `lumen_chart_stages` are no
+  longer read or written (a stock-skin smoothing preference no longer
+  affects Lumen's charts).
+- **Press flash is a filled chip now, not a ring.** The 0.29.1 ring
+  looked right on baked pills but drew a floating empty rectangle
+  around text links (Shot history, Curve — owner report). The flash is
+  a crema-tinted filled rounded chip with a thin crema border, LOWERED
+  beneath the control's own label: canvas items stack in creation
+  order, so the fresh flash is slid to just below the lowest visible
+  text item overlapping the zone — above the baked background and
+  pills, below every label. A chip materialises behind the text like a
+  real pressed button, on pills and text links alike. Border thinned
+  6 → 3 design px; 150ms lifetime and the one-shared-tag rule
+  unchanged.
+- **The grind card opens Grind Advisor's settings.** Tap zones A and B
+  (the card body and the bottom row left of Curve) now call
+  `open_grind_advisor`; the "Shot analysis" text link (zone C) keeps
+  the result popup and Curve is unchanged. The Lumen settings page's
+  GRIND ADVISOR row is REMOVED — CLOCK moved up into its slot, the
+  right column is three rows (THEME / BAGS TO CYCLE / CLOCK), and
+  `settings_button_row` went with its last caller.
+- Re-bake: the 8 home + settings images changed (both themes, both
+  resolutions), the 8 flow images byte-identical, chart_bg samples
+  unchanged (#151618/#DEE0E4 home, #171719/#DEE1E4 flow) so no palette
+  edits. Both harnesses green: 38 zones flash with their own
+  coordinates (down 2 for the pills), section-L glow behaviour passes
+  on the new chip, sections M/N untouched.
+
+## 0.35.0 — NEXT SHOT card: PROFILE stacked under the label
+
+**Safety status: unchanged. Text and tap-zone geometry only; no bake.**
+
+Owner request: the NEXT SHOT card's "PROFILE Gentle and sweet" moves to
+its own row under NEXT SHOT, matching the LAST SHOT card's stacked order
+(label / PROFILE / roaster / hero) so the two cards read as a pair again.
+
+- This reverses half of 0.27.0 (which merged PROFILE into the label row
+  to buy even 11px gaps). Six rows in the block's 148px cannot keep 10px
+  gaps, so the block re-spaces to a UNIFORM 7px gap with a 10px top pad:
+  label 584, PROFILE 606, roaster 629, hero 652 (→692), notes 699
+  (→715), action row untouched at 722. Evenness was the other half of
+  the 0.27.0 lesson — nothing is singled out as wedged.
+- The PROFILE value gets the block's full width (was 255 sharing the
+  label row), and the profile tap zone moves onto its row (40,592
+  460x44 — contains the row, ends above the hero).
+- Harness: id_prof_y back in the row-order check; the identity gap floor
+  is 7 for this six-row layout (comment documents the escape hatches if
+  it reads cramped on the tablet); profile-zone assertions reworked.
+  Both harnesses green.
+
+## 0.34.1 — spacing fixes (owner report on 0.34.0)
+
+**Safety status: unchanged. Geometry only.**
+
+- The taskbar day label touched the 12-hour time's "AM": the 0.34.0
+  position was placed on a 13px/glyph estimate, but the tablet's 26px
+  mono advances ~15.5px. Day moved 130 → 170 (~30px clear of the widest
+  zero-padded time); the harness estimate corrected to 16px/glyph.
+- The tiles' bottom text rows (Fair/Curve/Shot analysis, Shot history)
+  crowded the card border: the 8px the top cards gave the 0.31.0 taskbar
+  was too much (flagged then as a watch-item, now owner-confirmed).
+  Cards back to h 190 (ends 254), the chart pays instead (270..558,
+  h 288). Every internal row keeps its original clearance with zero row
+  edits — the grind tile's rows are grind_y-relative and the last-shot
+  card's absolute rows now simply have their 14-18px back.
+- Re-bake: only the four `lumen_home*` PNGs changed; `chart_bg` samples
+  unchanged. Both harnesses green.
+
+## 0.34.0 — taskbar wordmark + water readout; CLOCK formats row
+
+**Safety status: unchanged. No new reads or writes beyond two new
+`lumen_*` preference keys saved through the standard `save_settings`
+path.**
+
+Four owner requests in one pass:
+
+- **Water level moved to the taskbar** (from the last-shot card's
+  corner): machine status belongs on the status bar. Same accessor, same
+  blue mono, anchored right of centre one gap clear of the wrench zone;
+  blank whenever the machine has not reported in 10s. The card corner is
+  empty again.
+- **"Lumen" wordmark** dead-centre on the bar — passive, muted, not a
+  tap target.
+- **DECENT APP removed from Lumen settings** — redundant since the
+  taskbar's sliders icon (0.32.0, tablet-verified) opens the same
+  place. Its bottom-right row is now **CLOCK**.
+- **Time and date format options** on the CLOCK row: a 24H/12H toggle
+  and a date toggle showing a live sample ("26 Aug" ↔ "Aug 26"). New
+  settings `lumen_time_format` / `lumen_date_format`, defaults matching
+  0.31.0 exactly (24h, day-month); the bar picks changes up on the next
+  200 ms tick — no restart. The 12-hour time is zero-padded on purpose
+  ("08:05 AM") so the widest time is constant-width, and the day label's
+  fixed x moved 110 → 130 to clear it.
+- Re-bake: only the four `lumen_settings*` PNGs changed (DECENT APP's
+  accent pill out, two raised CLOCK pills in); home and flow images
+  MD5-identical.
+- Harness: section E updated for the moved readout (and asserts
+  water_label stays deleted), section N added (all four format
+  combinations by regexp, toggle persistence, live button labels),
+  settings-page bottom-right assertions now expect the two CLOCK
+  toggles, new taskbar spacing checks (water vs wordmark vs wrench, 12h
+  time vs day label). Both harnesses green.
+
+## 0.33.0 — taskbar pass 3 of 3: side panel absorbed, full-width strip
+
+**Safety status: unchanged. No new reads or writes; Profile's tap calls
+the same `open_profiles` the deleted panel button called.**
+
+The owner's Layout 2 end state, landed only after the 0.32.0 taskbar was
+tablet-verified carrying Settings and Sleep — the skin was never left
+without a way back to the skin picker.
+
+- Side panel deleted (panel, three pills, three tap zones). The bean
+  strip takes its 184px: full content width, 16..1324.
+- Stepper columns re-spread on the wider strip: 270 pitch (was 210),
+  value spans 140 (was 76) — "38.0 (1:2.0)"-class strings finally fit —
+  groups 240 wide, flush at the 1300 inner edge. Bottom row (readout /
+  Set dose / Scan bag) widened to 240 on the same grid, ending flush and
+  staying LEVEL with the identity block's action row.
+- Profile is now a tap on the identity row's PROFILE label+value
+  (zone 170..500, 48 tall, hanging into the chart-strip gap so it clears
+  the roaster line — zones may not overlap each other, and nothing else
+  taps there). Same `open_profiles` → stock settings_1 tab as before.
+- Second re-bake: only the four `lumen_home*` PNGs changed, all twelve
+  others MD5-identical; `chart_bg` samples unchanged (the chart did not
+  move).
+- Harness: side-panel checks replaced by PROFILE-zone checks (floor,
+  label+value coverage, roaster clearance, full-width strip); 40 zones
+  flash-covered (−3 panel, +1 profile). Both harnesses green.
+
+## 0.32.0 — taskbar pass 2 of 3: tappables + maintenance dot
+
+**Safety status: read access widens by one guarded case — the taskbar dot
+reads `::plugins::MaintenanceTracker::status_summary` (cache-backed on the
+plugin side) through the standard info-procs + catch + degrade guard.
+Nothing written; the wrench opens the plugin's own page via its public
+`open_page`, same contract as the Shot History and Grind Advisor
+shortcuts.**
+
+- Four tap zones on the bar, right-aligned in escalating consequence
+  toward the corner: wrench (Maintenance Tracker), gear (Lumen settings),
+  sliders (app settings), moon (Sleep). 56x48 each on a 72 pitch, ending
+  flush at the 1324 margin; all through `::lumen::tap`, so press flash
+  and sound come free. Glyphs from the app's own FA6 Pro font
+  (`F(symbol)`, the BT-glyph precedent) as `[format %c ...]` escapes,
+  with letter fallbacks (MNT/SET/APP/ZZZ) if the font failed to register.
+- Maintenance state dot at the wrench zone's top-right corner: amber for
+  "due soon", red for "overdue", nothing when all is well, when the
+  plugin is absent, or when anything about the read is off. Two stacked
+  fixed-colour items (the settings mode-line pattern); accessors ride the
+  200 ms tick against the plugin's own cache.
+- New palette token `C(danger)` (#DA515E dark / #B23641 light) — the
+  palette had no red that wasn't a chart series colour.
+- New guarded action `::lumen::act::open_maintenance` on the
+  shot_history template; Sleep calls the app's `start_sleep` exactly as
+  the side panel does. The side panel still duplicates Settings/Sleep
+  deliberately — it is removed in pass 3, after this bar is
+  tablet-verified.
+- No bake: icons and dot are text on the gradient; all sixteen PNGs
+  untouched.
+- Harness: taskbar zone budget checks (order/pitch/flush/floor, dot over
+  the wrench) and a new section M driving the dot accessors through
+  absent / ok / amber / red / failed / malformed / throwing plugin states.
+  42 zones now covered by the flash check (was 38). Both harnesses green.
+
+## 0.31.0 — taskbar pass 1 of 3: geometry, re-bake, live time
+
+**Safety status: unchanged. No new reads, no writes, no plugin calls. The
+two new accessors (`bar_time` / `bar_day`) call only `clock`, on the app's
+existing 200 ms variable tick.**
+
+First of three passes building the top taskbar (owner picked Layout 2 —
+"panel absorbed" — from the discovery report; the panel work lands in pass
+3). This pass carves the bar's space and puts the passive time/day on it;
+tappables (maintenance dot, gear, app settings, sleep) come next pass, so
+the side panel keeps Settings/Sleep for now — the unverified bar must
+never be their only home.
+
+- New geometry: taskbar 0..48; top cards 64..246 (h 182, −8); chart
+  262..558 (h 296, −40); bean strip and side panel untouched at 574..784.
+  The donors follow the discovery pass: the chart plot is the least
+  information-dense loss on the page, the cards' 0.23.0 budget had ~14 px
+  genuinely spare. The last-shot tile's absolute row tokens all moved
+  +48; the grind tile's rows hang off `grind_y` and moved for free.
+- Time (mono, `%H:%M`) and day (`%a %d %b`, caption) sit naked on the
+  baked gradient at the bar's left — the bar itself bakes nothing. They
+  ride the 200 ms onscreen-variable tick like every other live label
+  (dui only reconfigures on change, so the canvas redraws once per
+  minute).
+- All four `lumen_home*` PNGs re-baked (both themes, both resolutions);
+  the generator's `HOME_PANELS`/`HOME_INNER`, home bloom, and `chart_bg`
+  sample point (now y 410) mirror the new tokens. The twelve settings and
+  flow images came back **byte-identical** (MD5-verified) per the
+  image-diff discipline. Light `chart_bg` re-sampled: #DEE0E5 → #DEE0E4;
+  dark unchanged.
+- Harness: new taskbar budget checks (bar ≥ 44, bar→tiles gap ≥ md, top
+  cards level); fixed a latent harness fault the clock exposed — `clock
+  format`'s lazy autoload dies under the stubbed `source`/`package`, so
+  the harness now pre-warms it before installing the stubs. Both
+  harnesses pass: ALL CHECKS PASSED / LAST-SHOT LOADER CHECKS PASSED.
+
 ## 0.30.0 — the chart follows the bag cycler; the flash ring hugs the control
 
 **Safety status: unchanged. Read access widens by one case: the loader can
