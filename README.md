@@ -16,6 +16,8 @@ before the number, an Estimate chip, and the source ("Starting estimate:
 same roaster (4 bags)") — instead of just `--`. It is display-only and
 disappears the moment the bag's first real shot produces a calibration.
 
+![The grind tile showing a starting estimate for a fresh bag](docs/screenshot_estimate.png)
+
 Since 0.30.0 the top of the screen is a **taskbar**: a live clock and date
 (12/24-hour and day-month/month-day formats, chosen on the settings CLOCK
 row), the water level, and wrench / gear / sliders / moon icons — plugin
