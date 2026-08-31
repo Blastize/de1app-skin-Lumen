@@ -87,7 +87,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.37.1"
+    variable version "0.38.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -949,8 +949,69 @@ proc ::lumen::data::_g { rec key {default ""} } {
     return $default
 }
 
+# 0.38.0: the new-bag starting estimate (GrindAdvisor 3.13.0).
+#
+# For a bag with NO shots the tile used to show only "--" and "pull a
+# shot". starting_estimate returns a display-only starting grind borrowed
+# from already-calibrated bags (same coffee -> same roaster -> same
+# profile). It is an ESTIMATE, not a calibration: GrindAdvisor's contract
+# is that the word "Recommended" never appears next to it -- which is why
+# the tile's header label is an accessor now (grind_header) -- and that it
+# is NEVER called from a per-tick path, because it reads SDB and is not
+# memoized on the plugin side.
+#
+# So this caches per bag key. current_bag_key is explicitly safe on the
+# 200 ms tick (GrindAdvisor README, v3.7.0); the one SDB read happens on
+# the first tick after the key changes, then the dict is served from here.
+# A cached MISS ({}) is cached too, or a bag with no candidates would
+# re-read SDB five times per second. The cache never needs invalidating
+# beyond the key change: the moment the bag gets its first shot,
+# recommendation_for_current_bag returns a real rec, every accessor
+# prefers it, and the estimate is simply never consulted again.
+namespace eval ::lumen::data {
+    variable est_key ""
+    variable est_val {}
+}
+
+proc ::lumen::data::grind_est {} {
+    variable est_key
+    variable est_val
+    if { [info procs ::plugins::GrindAdvisor::starting_estimate] eq "" } { return {} }
+    if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {} }
+    if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {} }
+    if { $ck eq "" } { return {} }
+    if { $ck eq $est_key } { return $est_val }
+    set est_key $ck
+    set est_val {}
+    if { [catch { set e [::plugins::GrindAdvisor::starting_estimate] } err] } {
+        msg -ERROR "Lumen: starting_estimate failed: $err"
+        return {}
+    }
+    if { $e ne "" && ![catch { dict size $e }] \
+      && [dict exists $e grind] && [dict exists $e label] \
+      && [dict exists $e reason] } {
+        set est_val $e
+    }
+    return $est_val
+}
+
+# The tile's header label. Static "RECOMMENDED GRIND" until 0.38.0, now an
+# accessor purely so an estimate is never captioned "Recommended"
+# (GrindAdvisor's display contract for estimates).
+proc ::lumen::data::grind_header {} {
+    if { [grind_rec] eq "" && [grind_est] ne "" } {
+        return [translate "STARTING ESTIMATE"]
+    }
+    return [translate "RECOMMENDED GRIND"]
+}
+
 proc ::lumen::data::grind_next {} {
-    return [_num [_g [grind_rec] next] 1]
+    set rec [grind_rec]
+    if { $rec ne "" } { return [_num [_g $rec next] 1] }
+    # "~" marks the hero as an estimate even before the header registers.
+    set est [grind_est]
+    if { $est ne "" } { return "~[_num [dict get $est grind] 1]" }
+    return "--"
 }
 
 proc ::lumen::data::grind_delta {} {
@@ -981,7 +1042,12 @@ proc ::lumen::data::grind_delta {} {
 # fallback below.
 proc ::lumen::data::grind_method {} {
     set rec [grind_rec]
-    if { $rec eq "" } { return "" }
+    if { $rec eq "" } {
+        # 0.38.0: an estimate gets its own chip so the tile never presents
+        # a borrowed number as one of the calibration rungs.
+        if { [grind_est] ne "" } { return [translate "Estimate"] }
+        return ""
+    }
     set m [_g $rec method]
     switch -exact -- $m {
         first_shot           { return [translate "First shot"] }
@@ -1003,7 +1069,14 @@ proc ::lumen::data::grind_method {} {
 
 proc ::lumen::data::grind_band {} {
     set rec [grind_rec]
-    if { $rec eq "" } { return "" }
+    if { $rec eq "" } {
+        # 0.38.0: GrindAdvisor's reason string names the estimate's source
+        # rung -- "Starting estimate: same roaster (4 bags)". Worst case is
+        # 44 chars; the 48 ellipsis is a guard, not a working truncation.
+        set est [grind_est]
+        if { $est ne "" } { return [_ellipsis [dict get $est reason] 48] }
+        return ""
+    }
     set band [_g $rec confidence_band]
     set n    [_g $rec n]
     if { $band eq "" } {
@@ -1019,6 +1092,14 @@ proc ::lumen::data::grind_band {} {
 proc ::lumen::data::grind_note {} {
     set rec [grind_rec]
     if { $rec eq "" } {
+        # 0.38.0: the owner-specced estimate line plus the standing
+        # instruction. Widest case "Start ~50.0 (est. from 6 bags) - pull
+        # a shot to calibrate" is 57 chars -- one line at font_body in the
+        # note's 560px, same budget as the reasons _short_reason passes.
+        set est [grind_est]
+        if { $est ne "" } {
+            return "[dict get $est label] - [translate {pull a shot to calibrate}]"
+        }
         return [translate "Pull a shot on this bag to get a grind recommendation."]
     }
     set reason [_g $rec reason]
@@ -3269,7 +3350,11 @@ proc ::lumen::build_home {} {
     set gx [expr {$L(grind_x) + $L(pad_x)}]
     set gy [expr {$L(grind_y) + $L(pad_y)}]
 
-    txt $p $gx $gy [translate "RECOMMENDED GRIND"] \
+    # 0.38.0: the header is live -- "STARTING ESTIMATE" when the tile shows
+    # GrindAdvisor 3.13.0's new-bag estimate, because the plugin's display
+    # contract forbids captioning an estimate "Recommended". Same position,
+    # font and ink as the static label it replaces (both texts are 17 chars).
+    var $p $gx $gy {[::lumen::data::grind_header]} \
         -font $L(font_label) -fill $C(ink_3)
 
     # Vertical budget inside the 190-tall tile (0.23.0; content 36..192):
