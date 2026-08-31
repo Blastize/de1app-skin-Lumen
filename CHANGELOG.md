@@ -1,5 +1,47 @@
 # Changelog — Lumen
 
+## 0.38.0 — the grind tile shows GrindAdvisor's new-bag starting estimate — TABLET-VERIFIED 2026-08-29
+
+**Safety status: unchanged. Read-only accessors; no bake, no settings
+writes. The one new plugin call reads SDB through GrindAdvisor's own
+public, SELECT-only path.**
+
+GrindAdvisor 3.13.0 (tablet-verified today) added `starting_estimate`: a
+display-only starting grind for a bag with **no shots yet**, borrowed from
+already-calibrated bags (same coffee → same roaster → same profile, median
+of converged ideals). Until now the tile could only show `--` and "pull a
+shot" for a fresh bag; this pass is the skin half of the feature, the
+expose-only follow-up the plugin's pass planned.
+
+- **`::lumen::data::grind_est`** — the cached bridge. GrindAdvisor's
+  contract says `starting_estimate` must never run on a per-tick path (it
+  reads SDB, unmemoized), so the skin caches the result **per bag key**:
+  `current_bag_key` (tick-safe by design, GA v3.7.0) is compared each
+  tick, and the one SDB read happens on the first tick after the key
+  changes — misses ({}) are cached too. No invalidation needed beyond the
+  key change: after the bag's first shot,
+  `recommendation_for_current_bag` returns a real rec and every accessor
+  prefers it. Guarded for older GrindAdvisors (`info procs`), throwing
+  plugins, and junk dicts — all degrade to the plain new-bag tile.
+- **Tile in the estimate state**: header **STARTING ESTIMATE** (the
+  header label is a live accessor now, `grind_header`, because
+  GrindAdvisor's display contract forbids captioning an estimate
+  "Recommended"), hero **~13.5** (the `~` marks the borrowed number),
+  method chip **Estimate**, band = GrindAdvisor's reason string
+  ("Starting estimate: same roaster (4 bags)"), note =
+  "Start ~13.5 (est. from 4 bags) - pull a shot to calibrate" (57 chars
+  worst case — single line in the note's 560px budget).
+- With a recommendation present, with no candidates, on older
+  GrindAdvisor builds, or with the plugin absent, every accessor renders
+  exactly what 0.37.1 rendered — byte-for-byte, pinned by the harness.
+- `tools/check_skin.tcl` gained section **H**: the five accessors in the
+  estimate state, the no-"Recommended" sweep, cache behavior (one SDB
+  read per bag key, one recompute per key change, misses cached), the
+  pre-3.13.0 / throwing / hostile-dict degradations, and rec-beats-
+  estimate. Also fixed a harness self-parse trap: a literal `{{{` junk
+  string inside a braced list breaks the file's own brace balance — the
+  junk is built with `string repeat` now.
+
 ## 0.37.1 — the chip stays inside the button and matches its corners
 
 **Safety status: unchanged. Two numbers in press_flash.**

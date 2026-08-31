@@ -8,7 +8,13 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.37.1 — every page built, baked and running on the tablet.**
+**Version 0.38.0 — every page built, baked and running on the tablet.**
+
+New in 0.38.0: a freshly scanned bag with no shots shows GrindAdvisor's
+**starting estimate** on the grind tile — header STARTING ESTIMATE, a `~`
+before the number, an Estimate chip, and the source ("Starting estimate:
+same roaster (4 bags)") — instead of just `--`. It is display-only and
+disappears the moment the bag's first real shot produces a calibration.
 
 Since 0.30.0 the top of the screen is a **taskbar**: a live clock and date
 (12/24-hour and day-month/month-day formats, chosen on the settings CLOCK
@@ -43,7 +49,7 @@ backdrop and let the shadow do the separating.
 |---|---|---|
 | Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL (blank when no machine is connected) | The four icons: wrench = MaintenanceTracker's card list, gear = Lumen settings, sliders = the stock app settings, moon = sleep |
 | Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
-| Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count | Opens GrindAdvisor's settings (target time, rounding, history) |
+| Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count. A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, an Estimate chip, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
 | Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time — as **that shot recorded them**, read back from the shot file, so corrections made in the Shot History Editor appear here. `--` when the shot had no weight | — |
