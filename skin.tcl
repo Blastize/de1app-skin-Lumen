@@ -87,7 +87,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.38.0"
+    variable version "0.39.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -2188,6 +2188,66 @@ proc ::lumen::refresh_after_history_change {} {
         msg -ERROR "Lumen: bag list refresh failed: $err"
     }
     return ""
+}
+
+# Glass material provider (0.38.0 idea -> shipped 0.39.0).
+#
+# Plugin overlays -- GrindAdvisor's after-shot popup first -- can render an
+# iOS-style frosted-glass card IF the active skin offers the material. Tk
+# has no runtime blur or alpha, so the material is baked offline by
+# tools/make_backgrounds.py from this skin's own home background:
+#
+#   lumen_home_glass[_light].png  full-screen blur+tint slab; the consumer
+#                                 crops its card rect out of it with
+#                                 `photo copy -from` (never rescales)
+#   lumen_home_dim[_light].png    the home art dimmed, drawn full-screen as
+#                                 the modal scrim around the card
+#
+# Recipe: the owner-approved 2026-09-01 "variant C" mockup (blur 20@1340w,
+# dark tint 16/18/24 @34%, scrim 66%), with slab brightness/saturation run
+# hotter than the mock because baked art has no live content doing half the
+# glowing -- constants and rationale live in make_backgrounds.py GLASS.
+#
+# Contract -- returns {} unless BOTH hold, else a dict:
+#   * the current page is the home page ("off"): the material is baked from
+#     home art, and that is where the popup fires; on any other page a
+#     consumer keeps its opaque look.
+#   * both baked files exist in the folder matching this screen's exact
+#     physical WxH (consumers draw in physical pixels and cannot rescale;
+#     a 1280x800 tablet simply gets no material).
+# Dict: ok 1  page off  theme dark|light  radius 26  glass <path> dim <path>
+#
+# A consumer guards with [info procs ::lumen::glass_material] -- on any
+# other skin the proc does not exist and the popup stays opaque, which is
+# the owner's explicit requirement. Called once per popup open (it touches
+# the filesystem), NOT from a per-tick path.
+proc ::lumen::glass_material {} {
+    variable theme_mode
+
+    set pg ""
+    catch { set pg $::de1(current_context) }
+    if { $pg eq "" } { catch { set pg [dui page current] } }
+    if { $pg ne "off" } { return {} }
+
+    set sw 0
+    set sh 0
+    catch { set sw [winfo screenwidth .]; set sh [winfo screenheight .] }
+    if { $sw <= 0 || $sh <= 0 } { return {} }
+
+    set suffix [expr {$theme_mode eq "light" ? "_light" : ""}]
+    set dir "[homedir]/skins/Lumen/${sw}x${sh}"
+    set glass "$dir/lumen_home_glass$suffix.png"
+    set dim   "$dir/lumen_home_dim$suffix.png"
+    # 0.39.1: the PLAIN page background joins the contract. The consumer
+    # rings its card with a crop of it so the overlay's boundary shows
+    # pixel-identical art to the page it covers -- no seam, no guessed
+    # blend color (owner report on 3.14.3: every edge read as a hard
+    # cliff). It is the same file the page itself is built on.
+    set bg "$dir/lumen_home$suffix.png"
+    if { ![file exists $glass] || ![file exists $dim] || ![file exists $bg] } { return {} }
+
+    return [dict create ok 1 page off theme $theme_mode radius 26 \
+        glass $glass dim $dim bg $bg]
 }
 
 # Recolours a CORE dui dialog that the skin cannot reach through theming.
