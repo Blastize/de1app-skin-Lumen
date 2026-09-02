@@ -1,5 +1,82 @@
 # Changelog — Lumen
 
+## 0.40.0 — Drink Menu taskbar button
+
+**Safety status: unchanged. No settings writes added; no database, no history files.**
+
+Adds a Drink Menu taskbar button; water readout shifted left by 72 px; no other changes.
+
+- Fifth tappable in the taskbar's right-hand group, leftmost at design
+  x 980 (56x48 on the 72 pitch): FA6 `mug-hot` (`[format %c 0xF7B6]`)
+  in `font_bt`, text fallback "CUP" through the same mechanism as the
+  other four. Tap runs `::lumen::act::open_drinkmenu`, the exact
+  `catch` + `info procs` gate + `msg -ERROR` shape of the Maintenance
+  shortcut, calling `::plugins::DrinkMenu::open_page DrinkMenu_main`;
+  the plugin's page captures "off" as its return target so Done lands
+  back here.
+- `bar_water_x` 1028 -> 956: the widest readout ("1500 ml", 7 glyphs at
+  ~15.5 px in the 26 px mono face) spans 847..956, one lg clear of the
+  mug zone and ~150 px clear of the wordmark.
+- Housekeeping: the file banner's version line (stuck at 0.35.0 since
+  0.35.0) now tracks `variable version`; the taskbar comment counts five
+  tappables and drops the pre-0.32.0 "side panel duplicates" note.
+
+## 0.39.1 — the material adds `bg`, the plain page background — TABLET-VERIFIED 2026-09-01 (with GrindAdvisor 3.14.5)
+
+**Safety status: unchanged. One dict key in `glass_material`.**
+
+The consumer's card boundary read as a hard cliff no matter what blend
+color it guessed (GrindAdvisor 3.14.1–3.14.3, owner reports). Its
+3.14.4 fix rings the card with a crop of the page's own art, so the
+overlay boundary lands on pixel-identical pixels — and the material now
+carries `bg`, the path to `lumen_home[_light].png`, the very file the
+page is built on. Required alongside `glass`/`dim`; all three checked
+for existence. Harness H2 updated.
+
+## 0.39.0 — glass material provider for plugin overlays — TABLET-VERIFIED 2026-09-01 (via 0.39.1 + GrindAdvisor 3.14.5)
+
+**Safety status: unchanged. Nothing visible changes in Lumen itself — one
+new public proc and eight baked PNGs; no settings writes, no page edits.**
+
+First half of the iOS-style "liquid glass" popup feature (owner request,
+2026-09-01): GrindAdvisor's after-shot popup will render as a frosted
+translucent card showing the Lumen home screen through it — but only when
+this skin offers the material, so other skins keep the opaque popup.
+
+- Tk has no runtime blur/alpha, so `tools/make_backgrounds.py` now bakes
+  the material from the home background it already renders:
+  `lumen_home_glass[_light].png` (full-screen blur+tint slab the consumer
+  crops its card from) and `lumen_home_dim[_light].png` (the home art
+  dimmed, for the modal scrim) — both themes, both resolution folders,
+  ~730 KB total. Recipe = the owner-approved "variant C" mockup as a
+  base, tuned on-tablet 2026-09-01 for "more see-through": dark slab
+  blur 16@1340w, tint 16/18/24 @20%, saturation ×1.50, brightness ×1.28
+  (hotter than the mock because baked art has no live screen content
+  doing half the glowing); light slab blur 20, tint @38%, no boost (a
+  boosted near-white page clips to a blank sheet). The consumer
+  (GrindAdvisor 3.14.x) settled on a card-only overlay with the live
+  page around it, so the `dim` scrim assets are baked and contract-valid
+  but currently unconsumed.
+- **`::lumen::glass_material`** (new public proc) hands a consumer
+  `{ok 1 page off theme dark|light radius 26 glass <path> dim <path>}` —
+  and `{}` unless the current page is home AND both files exist for the
+  screen's exact physical WxH (consumers draw in physical pixels and
+  never rescale; a 1280x800 tablet simply gets no glass). Plugins guard
+  with `[info procs]`, so on any other skin the proc is absent and
+  nothing changes — the owner's explicit no-glass-off-skin requirement.
+  Called once per popup open, never per-tick (it touches the filesystem).
+- Harness section H2: material served on home in both themes with
+  existing files, refused off-home / for unknown resolutions, and quiet
+  with no page context. Regenerating the backgrounds was byte-identical
+  for all existing PNGs — only the eight new assets are new.
+- Known honest limit, stated up front: the glass shows the skin's baked
+  *art* through it. Live values (tile numbers, chart traces) are drawn by
+  the app above the bake and do not bleed through the slab; the on-device
+  look is therefore a touch subtler than the screenshot-sourced mockups.
+
+Next half: the GrindAdvisor consumer pass (opaque fallback everywhere the
+material is absent), then Lumen's own settings/flow pages later.
+
 ## 0.38.0 — the grind tile shows GrindAdvisor's new-bag starting estimate — TABLET-VERIFIED 2026-08-29
 
 **Safety status: unchanged. Read-only accessors; no bake, no settings

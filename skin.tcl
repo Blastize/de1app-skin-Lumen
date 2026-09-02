@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.35.0  (NEXT SHOT card: PROFILE stacked under the label)
+#  Version: 0.40.0  (taskbar: Drink Menu mug button; see `variable version`)
 #
 #
 #
@@ -87,7 +87,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.39.1"
+    variable version "0.40.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -329,18 +329,22 @@ proc ::lumen::_init_layout {} {
     # it must clear the widest format, not the current one.
     set L(bar_day_x) 170
     set L(bar_title_x) 670          ;# "Lumen" wordmark, page centre
-    set L(bar_water_x) 1028         ;# water readout, anchored e, one lg
-                                    ;# clear of the wrench zone at 1052
+    # 0.40.0: water readout moved left 72 (one icon pitch) to 956 so a
+    # fifth tappable fits at 980. Anchored e, 26px mono at ~15.5px per
+    # glyph: the widest value "1500 ml" spans 847..956, one lg clear of
+    # the mug zone at 980 and far from the wordmark ending near 700.
+    set L(bar_water_x) 956
 
-    # 0.32.0: the bar's four tappables, right-aligned in escalating
+    # 0.32.0: the bar's tappables, right-aligned in escalating
     # consequence toward the corner (Apple convention: passive status at
     # one end, controls grouped away from it). 56x48 zones on a 72 pitch,
     # ending flush with the page margin at 1324; every zone is the bar's
     # full height, comfortably over the 44px touch floor.
-    #   wrench 1052..1108   gear 1124..1180   sliders 1196..1252
-    #   moon 1268..1324
+    #   mug 980..1036 (0.40.0)   wrench 1052..1108   gear 1124..1180
+    #   sliders 1196..1252   moon 1268..1324
     set L(bar_icon_w)    56
     set L(bar_icon_pitch) 72
+    set L(bar_drinkmenu_x) 980
     set L(bar_wrench_x) 1052
     set L(bar_gear_x)   1124
     set L(bar_sliders_x) 1196
@@ -2922,6 +2926,24 @@ proc ::lumen::act::open_maintenance {} {
     }
 }
 
+# Opens the Drink Menu's grid from the taskbar mug (0.40.0). Same
+# contract as the three shortcuts above: open_page is the plugin's
+# public entry (the MaintenanceTracker cascade, copied verbatim into
+# DrinkMenu v0.1.0), its menu page captures the page it was opened from
+# by itself ("off" passes its transient-name filter), so Done returns
+# straight here with no bookkeeping on our side. Absent or disabled
+# plugin: the tap logs the error and does nothing else.
+proc ::lumen::act::open_drinkmenu {} {
+    if { [catch {
+        if { [info procs ::plugins::DrinkMenu::open_page] eq "" } {
+            error "the Drink Menu plugin is not loaded"
+        }
+        ::plugins::DrinkMenu::open_page DrinkMenu_main
+    } err] } {
+        msg -ERROR "Lumen: could not open the Drink Menu: $err"
+    }
+}
+
 # Cycles the next shot's bean bag through the most recent bags.
 #
 # Read and write both go through OTHER PLUGINS' public APIs. Lumen opens no
@@ -3351,11 +3373,10 @@ proc ::lumen::build_home {} {
     #  Taskbar (0.31.0 geometry + time; 0.32.0 tappables + dot)
     #
     #  Sits naked on the baked gradient -- no glass pill, so the bar
-    #  bakes nothing. Time/day pinned left; four tappables grouped right
-    #  in escalating consequence toward the corner: maintenance (wrench,
-    #  with the amber/red state dot), Lumen settings (gear), app settings
-    #  (sliders), Sleep (moon). The side panel still duplicates Settings
-    #  and Sleep until this bar is tablet-verified -- pass 3 resolves it.
+    #  bakes nothing. Time/day pinned left; five tappables grouped right
+    #  in escalating consequence toward the corner: Drink Menu (mug,
+    #  0.40.0), maintenance (wrench, with the amber/red state dot), Lumen
+    #  settings (gear), app settings (sliders), Sleep (moon).
     #
     #  Icon glyphs come from the app's own FA6 Pro font (F(symbol), the
     #  scale_bt precedent), as [format %c ...] escapes -- never literal
@@ -3381,6 +3402,7 @@ proc ::lumen::build_home {} {
     set sym_ok [_font_family_ok symbol]
     set bar_font [expr {$sym_ok ? $L(font_bt) : $L(font_label)}]
     foreach {xkey glyph fallback action label} [list \
+        bar_drinkmenu_x 0xF7B6 "CUP" {::lumen::act::open_drinkmenu}  "Drink menu" \
         bar_wrench_x  0xF0AD "MNT" {::lumen::act::open_maintenance}  "Maintenance" \
         bar_gear_x    0xF013 "SET" {::lumen::act::open_settings}     "Settings" \
         bar_sliders_x 0xF1DE "APP" {::lumen::act::open_app_settings} "App settings" \
