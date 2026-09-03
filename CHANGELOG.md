@@ -4,6 +4,26 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.41.0 - settings merge: sliders icon folded into a DECENT APP row - TABLET-VERIFIED 2026-09-03 (dark theme; four icons, Open -> stock settings -> home, no log errors)
+
+Base: 0.40.0.
+
+**Safety status: unchanged. No new writes; the row's tap runs the existing
+`::lumen::act::open_app_settings` (core `show_settings`), same as the removed icon.**
+
+- Taskbar: the sliders icon is gone -- gear and sliders side by side both read
+  as "settings" (owner report). Four tappables remain (mug 1052, wrench 1124,
+  gear 1196, moon 1268 -- shifted one pitch right, moon flush at 1324);
+  maintenance dot follows the wrench to 1174.
+- Lumen settings: DECENT APP row in the empty fourth right-column slot (512),
+  THEME-row pattern -- label, caption, neutral raised 150x56 "Open" button.
+- Baked `lumen_settings*.png` regenerated (both themes, 1340x800 + 2560x1600);
+  image-diff clean, only those four files changed. Palette samples unchanged.
+- check_skin.tcl regression rows updated (four-icon bar, CLOCK at ry3, DECENT
+  APP corner button); ALL CHECKS PASSED, no warnings.
+
+Files: skin.tcl, tools/make_backgrounds.py, tools/check_skin.tcl, 4 PNGs.
+
 ## 0.40.0 - Drink Menu taskbar button
 
 Base: 0.39.1.
