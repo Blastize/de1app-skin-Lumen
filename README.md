@@ -8,12 +8,14 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.41.0 — every page built, baked and running on the tablet.**
+**Version 0.42.0 — every page built, baked and running on the tablet.**
 
-New in 0.41.0: the taskbar's **sliders** icon is gone — gear and sliders
-side by side both read as "settings". The stock app settings now open
-from a **DECENT APP** row on the Lumen settings page (fourth right-column
-slot), and the four remaining icons shifted one pitch toward the corner.
+New in 0.42.0: the stock app settings are one tap away again, behind a
+**drawn side view of the DE1** in the taskbar slot the old sliders glyph
+held (0.41.0 had briefly moved them behind a settings-page row — two
+taps — after the gear-next-to-sliders ambiguity was fixed). The icon is
+vector strokes in the palette ink: body, tilted screen, group head,
+drip tray.
 
 New in 0.40.0: a taskbar button, the **mug**, opens the Drink Menu
 plugin's grid (Done returns straight to the home page). The water
@@ -36,8 +38,9 @@ disappears the moment the bag's first real shot produces a calibration.
 
 Since 0.30.0 the top of the screen is a **taskbar**: a live clock and date
 (12/24-hour and day-month/month-day formats, chosen on the settings CLOCK
-row), the water level, and mug / wrench / gear / moon icons — Drink Menu,
-plugin maintenance, Lumen settings, and sleep. A
+row), the water level, and mug / wrench / gear / DE1 / moon icons — Drink
+Menu, plugin maintenance, Lumen settings, the stock app settings (a drawn
+side view of the machine), and sleep. A
 **maintenance dot** at the wrench turns amber or red when the
 MaintenanceTracker plugin says something is due or overdue. The old side
 panel is gone; the bean strip runs the full width, and the chart lost its
@@ -65,7 +68,7 @@ backdrop and let the shadow do the separating.
 
 | Tile | Shows | Tap |
 |---|---|---|
-| Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL (blank when no machine is connected) | The four icons: mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, moon = sleep |
+| Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL (blank when no machine is connected) | The five icons: mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, DE1 side view = the stock app settings, moon = sleep |
 | Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
 | Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count. A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, an Estimate chip, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
@@ -216,11 +219,10 @@ The selected setting is the large value between the pills; the other sits
 small beneath it, so both are always readable. The choice persists — whichever
 half you last steered is the one waiting next time.
 
-The right column runs **THEME**, **BAGS TO CYCLE**, **CLOCK** and
-**DECENT APP** — the last one's Open button is the door to the stock app
-settings (profiles, plugins, firmware) since 0.41.0 replaced the
-taskbar's sliders icon. Grind Advisor's settings open from the grind
-card itself, so they need no row here.
+The right column runs **THEME**, **BAGS TO CYCLE** and **CLOCK**. The
+stock app settings (profiles, plugins, firmware) open from the taskbar's
+DE1 icon, and Grind Advisor's settings from the grind card itself — so
+neither needs a row here.
 
 *Bags to cycle* (3–10, default 5) sets how many recent bean bags the home
 strip's bag cycler offers. It is stored in `::settings(lumen_bag_count)` and

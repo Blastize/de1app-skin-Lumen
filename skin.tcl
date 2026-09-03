@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.41.0  (settings merge: sliders icon -> DECENT APP row; see `variable version`)
+#  Version: 0.42.0  (drawn DE1 side-view icon opens the app settings; see `variable version`)
 #
 #
 #
@@ -87,7 +87,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.41.0"
+    variable version "0.42.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -331,9 +331,8 @@ proc ::lumen::_init_layout {} {
     set L(bar_title_x) 670          ;# "Lumen" wordmark, page centre
     # 0.40.0: water readout moved left 72 (one icon pitch) to 956 so a
     # fifth tappable fits at 980. Anchored e, 26px mono at ~15.5px per
-    # glyph: the widest value "1500 ml" spans 847..956. (0.41.0: the
-    # icon group starts at 1052 now, so the clearance only grew; the
-    # readout stays put rather than chasing the group.)
+    # glyph: the widest value "1500 ml" spans 847..956, one lg clear of
+    # the mug zone at 980 and far from the wordmark ending near 700.
     set L(bar_water_x) 956
 
     # 0.32.0: the bar's tappables, right-aligned in escalating
@@ -342,21 +341,23 @@ proc ::lumen::_init_layout {} {
     # ending flush with the page margin at 1324; every zone is the bar's
     # full height, comfortably over the 44px touch floor.
     #
-    # 0.41.0: the sliders icon is GONE -- gear and sliders both read as
-    # "settings" side by side (owner report), so the app settings moved
-    # behind a DECENT APP row on the Lumen settings page and the four
-    # remaining icons shifted one pitch right, moon still in the corner.
-    #   mug 1052..1108   wrench 1124..1180   gear 1196..1252
-    #   moon 1268..1324
+    # 0.41.0 removed the sliders icon (gear + sliders side by side both
+    # read as "settings") for a DECENT APP settings row; 0.42.0 reversed
+    # that -- the owner wants the app settings one tap away -- with a
+    # DRAWN side-view-of-the-DE1 icon in the old slot instead of the
+    # ambiguous sliders glyph (see draw_de1_icon).
+    #   mug 980..1036   wrench 1052..1108   gear 1124..1180
+    #   DE1 1196..1252   moon 1268..1324
     set L(bar_icon_w)    56
     set L(bar_icon_pitch) 72
-    set L(bar_drinkmenu_x) 1052
-    set L(bar_wrench_x) 1124
-    set L(bar_gear_x)   1196
+    set L(bar_drinkmenu_x) 980
+    set L(bar_wrench_x) 1052
+    set L(bar_gear_x)   1124
+    set L(bar_de1_x)    1196
     set L(bar_moon_x)   1268
     # Maintenance state dot: top-right corner of the wrench zone, clear of
-    # the 22px glyph centred at (1152, 24).
-    set L(bar_dot_x)    1174 ; set L(bar_dot_y) 12
+    # the 22px glyph centred at (1080, 24).
+    set L(bar_dot_x)    1102 ; set L(bar_dot_y) 12
 
     set L(grind_x)   16 ; set L(grind_y)  64
     set L(grind_w)  650 ; set L(grind_h) 190
@@ -844,6 +845,37 @@ proc ::lumen::chip { page x y text args } {
     dui add dtext $page [X [expr {$x + $w / 2.0}]] [Y [expr {$y + $h / 2.0}]] \
         -text $text -font $L(font_label) -fill $o(-fill) \
         -anchor center -justify center
+}
+
+# 0.42.0: the Decent app taskbar icon -- a SIDE VIEW of the DE1, drawn
+# as vector strokes (owner-picked sample 1 of 3, 2026-09-03: body,
+# tilted screen edge-on, group head block, drip tray). No Font Awesome
+# glyph exists for this, and drawn strokes take the palette ink exactly
+# like the font glyphs do. `cx`/`cy`/`size` in DESIGN px; the normalized
+# 0..1 geometry is copied from the approved sample sheet's template
+# (scratch de1_icons.py, variant 1), content centre (0.59, 0.495).
+# Stroke -width 4 is VIRTUAL (canvas_item rescales -width): ~2 physical
+# px, matching the FA regular glyph weight beside it.
+proc ::lumen::draw_de1_icon { page cx cy size color } {
+    foreach {x0 y0 x1 y1 r} [list \
+        0.40 0.18 0.94 0.78 0.09  \
+        0.24 0.86 0.94 0.97 0.045 \
+        0.24 0.44 0.40 0.56 0.035] {
+        rounded_rect $page \
+            [X [expr {$cx + ($x0 - 0.59) * $size}]] \
+            [Y [expr {$cy + ($y0 - 0.495) * $size}]] \
+            [X [expr {$cx + ($x1 - 0.59) * $size}]] \
+            [Y [expr {$cy + ($y1 - 0.495) * $size}]] \
+            [X [expr {2 * $r * $size}]] \
+            -fill {} -outline $color -width 4
+    }
+    # The tilted screen, edge-on (rises above the body's top front).
+    uplevel #0 [list dui add canvas_item line $page \
+        [X [expr {$cx + (0.44 - 0.59) * $size}]] \
+        [Y [expr {$cy + (0.22 - 0.495) * $size}]] \
+        [X [expr {$cx + (0.64 - 0.59) * $size}]] \
+        [Y [expr {$cy + (0.02 - 0.495) * $size}]] \
+        -fill $color -width 4 -capstyle round]
 }
 
 #############################################################################
@@ -3378,12 +3410,12 @@ proc ::lumen::build_home {} {
     #  Taskbar (0.31.0 geometry + time; 0.32.0 tappables + dot)
     #
     #  Sits naked on the baked gradient -- no glass pill, so the bar
-    #  bakes nothing. Time/day pinned left; four tappables grouped right
+    #  bakes nothing. Time/day pinned left; five tappables grouped right
     #  in escalating consequence toward the corner: Drink Menu (mug,
     #  0.40.0), maintenance (wrench, with the amber/red state dot),
-    #  settings (gear), Sleep (moon). (0.41.0: the sliders icon merged
-    #  into the settings page's DECENT APP row -- two adjacent icons
-    #  both meaning "settings" confused the owner.)
+    #  Lumen settings (gear), the Decent app (drawn DE1 side view,
+    #  0.42.0 -- 0.41.0's sliders glyph was ambiguous next to the gear
+    #  and its DECENT APP row replacement cost two taps), Sleep (moon).
     #
     #  Icon glyphs come from the app's own FA6 Pro font (F(symbol), the
     #  scale_bt precedent), as [format %c ...] escapes -- never literal
@@ -3419,6 +3451,14 @@ proc ::lumen::build_home {} {
             -font $bar_font -fill $C(ink_2) -anchor center -justify center
         tap $p $ix $L(bar_y) $L(bar_icon_w) $L(bar_h) $action $label
     }
+
+    # 0.42.0: the Decent app slot -- a drawn icon, not a glyph, so it
+    # sits outside the foreach. Same ink, same zone, one tap to the
+    # stock settings (reversing 0.41.0's two-tap DECENT APP row).
+    draw_de1_icon $p [expr {$L(bar_de1_x) + $L(bar_icon_w) / 2.0}] \
+        $bar_mid 26 $C(ink_2)
+    tap $p $L(bar_de1_x) $L(bar_y) $L(bar_icon_w) $L(bar_h) \
+        {::lumen::act::open_app_settings} "Decent app"
 
     # Maintenance state dot: two stacked fixed-colour items, the glyph
     # moves between them (settings mode-line pattern; a canvas item's
@@ -4013,15 +4053,16 @@ proc ::lumen::build_settings {} {
     #  Two columns:
     #
     #    left  170..630 : BREW / STEAM / FLUSH / HOT WATER  (machine)
-    #    right 670..1170: THEME / BAGS TO CYCLE / CLOCK / DECENT APP
+    #    right 670..1170: THEME / BAGS TO CYCLE / CLOCK
     #
     #  0.36.0 (owner request): the GRIND ADVISOR row is GONE -- tapping
     #  the grind card on the home page opens those settings now -- and
-    #  CLOCK moved up into its slot. 0.41.0: DECENT APP fills the fourth
-    #  slot again (it holds the app settings the taskbar's removed
-    #  sliders icon used to open), so both columns run the full
-    #  110/244/378/512 grid. The left column is untouched -- it is the
-    #  machine column, and all four of its steppers stay together.
+    #  CLOCK moved up into its slot, so the right column is three rows
+    #  ending at 496 (0.41.0 briefly added a DECENT APP fourth row;
+    #  0.42.0 removed it for the taskbar's one-tap DE1 icon). The left
+    #  column is untouched -- it is the machine column, and all four of
+    #  its steppers stay together. Rows on the same 110/244/378/512 grid
+    #  as ever (left uses all four).
     ####################################################################
     set lx $L(set_col_l) ; set lw $L(set_col_l_w)
     set rx $L(set_col_r) ; set rw $L(set_col_r_w)
@@ -4134,24 +4175,9 @@ proc ::lumen::build_settings {} {
     tap $p $ck_time_x $ck_by $ck_time_w $ck_bh \
         {::lumen::act::toggle_time_format} "Time format"
 
-    # DECENT APP (0.41.0): the taskbar's sliders icon merged into this
-    # row -- two adjacent taskbar icons both meaning "settings" confused
-    # the owner. Fourth right-column slot (empty since 0.36.0), THEME-row
-    # pattern: neutral raised button, same open_app_settings action the
-    # icon carried.
-    glass $p $rx $ry4 $rw $L(set_row_h)
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry4 + 26}] [translate "DECENT APP"] \
-        -font $L(font_label) -fill $C(ink_3)
-    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry4 + 56}] \
-        [translate "Profiles, machine and app-wide settings."] \
-        -font $L(font_caption) -fill $C(ink_2) -width 290
-    set ap_bx [expr {$rx + $rw - $L(pad_x) - $bw}]
-    set ap_by [expr {$ry4 + ($L(set_row_h) - $bh) / 2}]
-    glass $p $ap_bx $ap_by $bw $bh -radius $L(radius_sm) -fill $C(glass_2)
-    txt $p [expr {$ap_bx + $bw / 2.0}] [expr {$ap_by + $bh / 2.0}] \
-        [translate "Open"] -font $L(font_button) -fill $C(ink) \
-        -anchor center -justify center
-    tap $p $ap_bx $ap_by $bw $bh {::lumen::act::open_app_settings} "Decent app"
+    # (0.41.0 put a DECENT APP row in the fourth slot; 0.42.0 removed it
+    # again -- the owner wants the app settings ONE tap away, so they
+    # live on the taskbar's drawn DE1 icon instead.)
 
     set dw $L(set_done_w) ; set dh $L(set_done_h)
     set dx [expr {$L(center_x) - $dw / 2}]

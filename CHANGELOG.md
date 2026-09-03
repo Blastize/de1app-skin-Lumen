@@ -4,7 +4,25 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.41.0 - settings merge: sliders icon folded into a DECENT APP row - TABLET-VERIFIED 2026-09-03 (dark theme; four icons, Open -> stock settings -> home, no log errors)
+## 0.42.0 - drawn DE1 side-view icon opens the app settings (one tap again)
+
+Base: 0.41.0.
+
+**Safety status: unchanged. The icon's tap runs the existing `open_app_settings`; no writes.**
+
+- Owner verdict on 0.41.0: the DECENT APP row costs two taps - reversed. Fifth taskbar
+  slot returns at 1196 (mug/wrench/gear back to 980/1052/1124, dot to 1102), but with a
+  DRAWN side view of the DE1 (owner-picked sample 1: body, tilted screen edge-on, group
+  head, drip tray) instead of the ambiguous sliders glyph. New `draw_de1_icon`: three
+  `rounded_rect` outlines + one round-capped line, palette ink, virtual -width 4 (~2px
+  physical, matching the FA glyph weight). No glyph fallback needed - vectors always draw.
+- DECENT APP settings row removed; right column back to three rows; the four settings
+  PNGs re-baked byte-identical to the 0.40.0 assets (hash-verified).
+- check_skin.tcl: five-zone bar again + the DE1 zone must carry open_app_settings.
+
+Files: skin.tcl, tools/make_backgrounds.py, tools/check_skin.tcl, 4 PNGs (reverted).
+
+## 0.41.0 - settings merge: sliders icon folded into a DECENT APP row - TABLET-VERIFIED 2026-09-03 (dark theme; four icons, Open -> stock settings -> home, no log errors) - REVERSED by 0.42.0 same day (two taps)
 
 Base: 0.40.0.
 
