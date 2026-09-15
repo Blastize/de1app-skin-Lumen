@@ -4,7 +4,7 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.45.0 - LOW WATER threshold row fills the settings page's fourth slot
+## 0.45.0 - LOW WATER threshold row fills the settings page's fourth slot - TABLET-VERIFIED 2026-09-15 (dark theme via DevBridge: "300 ml" between its pills, caption on two lines clear of the group, columns level; no log errors)
 
 Base: 0.44.0. **Safety status: ONE new preference write, `lumen_water_low_ml`
 (100..800 ml, step 50, default 300), written only by the row's -/+ taps
