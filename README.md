@@ -8,7 +8,17 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.42.0 — every page built, baked and running on the tablet.**
+**Version 0.43.0 — every page built, baked and running on the tablet.**
+
+New in 0.43.0: the chart and the LAST SHOT card show the last **real**
+shot of the loaded bean. A cleaning run (or a backflush, calibration,
+descale, or an abort under 5 s) is saved by the app exactly like a shot,
+so it used to take over the home page until the next espresso; now it is
+skipped at startup, when a Shot History Editor change reloads the page,
+when the bag cycler switches bags, and the moment the cleaning run
+finishes. The card also names the bean the shot file records, so a fresh
+bag with no shots yet shows the previous bag's last shot under that bag's
+own name.
 
 New in 0.42.0: the stock app settings are one tap away again, behind a
 **drawn side view of the DE1** in the taskbar slot the old sliders glyph
@@ -73,9 +83,9 @@ backdrop and let the shadow do the separating.
 | Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count. A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, an Estimate chip, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
-| Last shot | The profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time — as **that shot recorded them**, read back from the shot file, so corrections made in the Shot History Editor appear here. `--` when the shot had no weight | — |
+| Last shot | The last **real espresso** of the loaded bean (cleaning, backflush, calibration and sub-5 s runs are skipped; a bag with no shots yet falls back to the newest real shot of any bag): the profile it ran on, the roaster and bean, then grind, dose, yield (with the ratio beneath) and time — as **that shot recorded them**, read back from the shot file, so corrections made in the Shot History Editor appear here. `--` when the shot had no weight | — |
 | Shot history (Last shot tile) | — | Opens the Shot History Editor (edit / soft-delete past shots) |
-| Graph | Pressure, flow, cumulative weight and basket temperature for the shot — always smoothed (Catmull-Rom through the recorded samples), with dashed stage separators at every frame change | — |
+| Graph | Pressure, flow, cumulative weight and basket temperature for that shot — always smoothed (Catmull-Rom through the recorded samples), with dashed stage separators at every frame change. Live during a shot; after a cleaning run it goes back to the bean's last real shot | — |
 | Next shot | The profile, the roaster, the bean, and its tasting notes | PROFILE row opens the app's profile chooser |
 | ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
@@ -288,8 +298,14 @@ it hardcodes a coordinate.
 
 ## Safety
 
-No database is opened, and no file in `history/` or `history_v2/` is read,
-written, renamed or deleted.
+No database is opened, and no file in `history/` or `history_v2/` is
+written, renamed or deleted. Shot files in `history/` are **read**, one at
+a time and only when the home page selects a shot to show (startup, a bag
+cycle, a Shot History Editor change, the end of a cleaning run) — never on
+the refresh tick. Which files to try comes from SDB's public read API when
+the plugin is loaded, else from the directory listing; a file's curves are
+copied into the chart and its `settings` block is parsed into a local
+array, never into the live settings.
 
 Every `::settings` write happens only on an explicit tap, and every stepper
 clamps its value. Three groups:

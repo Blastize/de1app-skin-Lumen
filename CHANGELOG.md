@@ -4,6 +4,33 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.43.0 - the chart shows the last REAL shot of the loaded bean
+
+Base: 0.42.0.
+
+**Safety status: unchanged. No writes of any kind; reads are history/*.shot
+files, one at a time, only when a shot is selected for the home page (never
+per tick). SDB through its public `shots` / `string2sql` only.**
+
+- Owner report: a cleaning run took over the home chart and LAST SHOT card.
+  Cause, verified on the tablet: the core saves a cleaning run as a normal
+  shot file (`beverage_type cleaning`, ~140 s, the loaded bag's bean fields
+  copied in), so "newest file" (startup) and "the bag's newest SDB clock"
+  (cycler) both landed on it, and nothing reloaded after the run.
+- New `last_shot_candidates`: the bag's shots from SDB filtered like DYE
+  (`beverage_type NOT IN cleaning/calibrate`), then any bag, then the
+  directory newest-first; `_load_shot_file` rejects by GrindAdvisor's
+  non-espresso regex on profile/beverage type and by a 5 s floor, and
+  steps to the next candidate. Used by startup, SHE refresh and the cycler.
+- `after_flow_complete` listener (registered after the core's save, FIFO):
+  a flow latched as non-espresso at espresso-page show reloads the bean's
+  last real shot once the file is saved.
+- LAST SHOT card names the FILE's roaster/bean (was the live settings).
+- Harness: check_last_shot.tcl section K (directory + SDB paths, in-session
+  hook, regex), J rewritten for the resolver; check_skin asserts the hook.
+
+Files: skin.tcl, tools/check_last_shot.tcl, tools/check_skin.tcl, docs.
+
 ## 0.42.0 - drawn DE1 side-view icon opens the app settings (one tap again)
 
 Base: 0.41.0.

@@ -5,18 +5,23 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.42.0  (drawn DE1 side-view icon opens the app settings; see `variable version`)
+#  Version: 0.43.0  (the chart shows the last REAL shot of the loaded bean; see `variable version`)
 #
 #
 #
 #  SAFETY STATUS: no database is opened. Nothing in history/ or history_v2/
 #  is written, renamed or deleted -- ever, in any version.
 #
-#  READ access is limited to ONE file: load_last_shot_curves opens the newest
-#  history/*.shot at startup, for the chart vectors, the profile name and what
-#  that shot was pulled with. It parses into a LOCAL array; the stock
-#  preview_history does `array set ::settings $props(settings)`, which would
-#  overwrite the live configuration with a stale one.
+#  READ access is limited to history/*.shot files, read one at a time and
+#  only when a shot is being SELECTED for the home page (startup, a bag
+#  cycle, a Shot History Editor change, the end of a cleaning run) -- never
+#  on the 200 ms refresh tick. 0.43.0: load_last_shot_curves walks a short
+#  candidate list (the loaded bean's newest shots, from SDB's public read
+#  API, then the directory) and rejects cleaning / calibration / rinse
+#  runs and sub-5 s aborts, so it may open a handful of files before one
+#  passes. Each is parsed into a LOCAL array; the stock preview_history
+#  does `array set ::settings $props(settings)`, which would overwrite the
+#  live configuration with a stale one.
 #
 #  (Before 0.25.0 this block claimed nothing in history/ was read at all.
 #  That was already untrue -- the curve loader has been there since 0.9.0.)
@@ -87,7 +92,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.42.0"
+    variable version "0.43.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -122,9 +127,12 @@ namespace eval ::lumen {
     # the case this line exists to show.
     variable last_shot_profile ""
 
-    # What the newest shot FILE records: grind, dose and yield, read out of
-    # its settings block by load_last_shot_curves at startup. Keys grind,
-    # dose, yield; absent means "not recorded".
+    # What the loaded shot FILE records: grind, dose and yield, read out of
+    # its settings block by load_last_shot_curves. Keys grind, dose, yield,
+    # plus (0.43.0) roaster and bean -- the identity the file carries, so
+    # the LAST SHOT card names the shot's own bean even when the loaded bag
+    # differs (a fresh bag with no shots falls back to the previous bag's
+    # last shot, and the card must say so). Absent means "not recorded".
     #
     # These are what the LAST SHOT card shows, in preference to the live
     # ::settings, because the two answer different questions (0.25.0):
@@ -145,6 +153,13 @@ namespace eval ::lumen {
     # what the running shot is recording, so they become the better source.
     variable last_shot_rec
     array set last_shot_rec {}
+
+    # 0.43.0: 1 while the flow that last opened the espresso page runs a
+    # NON-espresso profile (cleaning, backflush, calibration ...). Set by
+    # latch_shot_profile, consumed by after_flow_complete, which then
+    # reloads the loaded bean's last real shot so a cleaning run never
+    # stays on the home chart.
+    variable last_flow_nonespresso 0
 
     # after-id of the debounced machine-settings save/send (settings page).
     variable machine_apply_id ""
@@ -1316,17 +1331,26 @@ proc ::lumen::data::bean_notes_line {} {
 
 # The same three for the LAST shot's card. The narrower column (274px) takes
 # a tighter cap.
+#
+# 0.43.0: the FILE's bean first (last_shot_rec roaster/bean), the live
+# settings only as the in-session fallback -- the same record-versus-plan
+# split grind/dose/yield already follow. Until then the card read the live
+# bean fields, so a shot loaded for a different bag (startup with a fresh
+# bag scanned, or the fallback below) sat under the wrong name.
 proc ::lumen::data::last_roaster_line {} {
-    set v [string trim [_s ::settings(bean_brand)]]
+    set v [string trim [_rec roaster]]
+    if { $v eq "" } { set v [string trim [_s ::settings(bean_brand)]] }
     if { $v eq "" } { return "" }
     return [_ellipsis $v 30]
 }
 
 proc ::lumen::data::last_name_line {} {
     # 274px at font_primary (22px) holds ~24 characters.
-    set v [string trim [_s ::settings(bean_type)]]
+    set v [string trim [_rec bean]]
+    if { $v eq "" } { set v [string trim [_s ::settings(bean_type)]] }
     if { $v ne "" } { return [_ellipsis $v 24] }
-    set b [string trim [_s ::settings(bean_brand)]]
+    set b [string trim [_rec roaster]]
+    if { $b eq "" } { set b [string trim [_s ::settings(bean_brand)]] }
     if { $b ne "" } { return [_ellipsis $b 24] }
     return "--"
 }
@@ -1989,21 +2013,149 @@ proc ::lumen::bag_count {} {
     return $v
 }
 
-# Loads the most recent saved shot into the live chart vectors, once, at
-# startup. Without this the home chart is blank every time you open the app
-# until you pull a shot -- the vectors are created empty at launch and only
+# ---- what counts as a real shot (0.43.0) ----------------------------------
+#
+# A cleaning run ("Cleaning/Forward Flush x5" and friends) is an espresso
+# flow to the machine, so the core saves it to history/ exactly like a
+# shot: a <clock>.shot file with `beverage_type cleaning` in its settings
+# block, ~140 s of samples, and the bean fields of whatever bag was loaded
+# copied in. Verified on the tablet 2026-09-15 (seven such files). Picking
+# "the newest file" therefore put the cleaning run on the home chart and
+# the LAST SHOT card until the next real shot, and because it carries the
+# bag's bean fields, "the bag's newest SDB clock" landed on it too.
+#
+# The regex is GrindAdvisor's own _reject_re (GrindAdvisor.tcl:1101),
+# copied verbatim so the skin and the advisor agree on what a real shot
+# is; the 5 s floor is the workspace event-safety rule and GA's gate.
+namespace eval ::lumen {
+    variable nonespresso_re {\m(rinse|flush|backflush|clean|cleaning|descale|hot\s*water|water|steam|skip|dummy|calibrat\w*)\M}
+}
+
+proc ::lumen::text_is_nonespresso { text } {
+    variable nonespresso_re
+    set t [string trim $text]
+    if { $t eq "" } { return 0 }
+    return [regexp -nocase -- $nonespresso_re $t]
+}
+
+proc ::lumen::shot_min_secs {} { return 5.0 }
+
+# "" when the parsed shot file (an array name in the caller) is a real
+# espresso, else a short reason for the log. Checks the settings block's
+# beverage_type and profile_title against the regex, then the duration.
+proc ::lumen::_shot_reject_reason { propsvar } {
+    upvar 1 $propsvar props
+    if { [info exists props(settings)] && ![catch { array set s $props(settings) }] } {
+        foreach f {beverage_type profile_title} {
+            if { [info exists s($f)] && [text_is_nonespresso $s($f)] } {
+                return "$f '[string trim $s($f)]'"
+            }
+        }
+    }
+    if { ![info exists props(espresso_elapsed)] } { return "no samples" }
+    set t [lindex $props(espresso_elapsed) end]
+    if { ![string is double -strict $t] } { return "no elapsed time" }
+    if { $t < [shot_min_secs] } { return "only ${t}s" }
+    return ""
+}
+
+# The files worth trying for the home chart, best first (0.43.0):
+#
+#   1. the bag's own shots, newest first, from SDB -- filtered in SQL the
+#      way DYE filters its recent list (`beverage_type NOT IN cleaning /
+#      calibrate`, COALESCE so an old untagged shot is kept)
+#   2. any bag's shots, same filter -- a fresh bag with no shots yet gets
+#      the previous bag's last shot rather than a blank chart, and the
+#      LAST SHOT card names that bag (last_roaster_line reads the file)
+#   3. the directory, newest FILENAME first (the 0.26.1 rule), capped --
+#      the path with SDB absent or not loaded yet (the 5 s startup call)
+#
+# SDB is only ever its public read API, guarded and caught; nothing here
+# opens a database handle or a file. Clock -> file is the app's own naming
+# rule, and a clock whose file is gone (soft-deleted) is skipped. The
+# loader applies the file-level filter (_shot_reject_reason) as the
+# second net, so a stale or absent SDB only costs a few extra reads.
+proc ::lumen::last_shot_candidates { {bag ""} } {
+    set out {}
+    set cap 12
+    if { $bag eq "" } { set bag [current_bag] }
+    set dir "[homedir]/history"
+    if { ![file isdirectory $dir] } { return {} }
+
+    if { [info procs ::plugins::SDB::shots] ne "" \
+      && [info procs ::plugins::SDB::string2sql] ne "" } {
+        set bev "COALESCE(beverage_type,'') NOT IN ('cleaning','calibrate')"
+        set filters {}
+        if { $bag ne "" } {
+            lappend filters "bean_desc=[::plugins::SDB::string2sql $bag] AND $bev"
+        }
+        lappend filters $bev
+        foreach filter $filters {
+            if { [catch { set clocks [::plugins::SDB::shots clock 1 $filter $cap "clock DESC"] } err] } {
+                msg -NOTICE "Lumen: SDB shot query failed ($filter): $err"
+                continue
+            }
+            foreach c $clocks {
+                if { ![string is integer -strict $c] } { continue }
+                if { [catch { set f "$dir/[clock format $c -format %Y%m%dT%H%M%S].shot" }] } { continue }
+                if { [file isfile $f] && $f ni $out } { lappend out $f }
+            }
+        }
+    }
+
+    # "Newest" means the most recent SHOT, which is not the most recently
+    # modified FILE (0.26.1): the app names every shot file
+    # YYYYMMDDTHHMMSS.shot, so sorting the names is sorting by shot time,
+    # while editing a shot's metadata in the Shot History Editor touches
+    # its mtime (a July shot corrected today became the home page, seen on
+    # the tablet 2026-08-19). mtime remains the fallback for files whose
+    # name is not a timestamp, used only when NO file has a parseable one.
+    set named {} ; set others {}
+    foreach f [glob -nocomplain -directory $dir *.shot] {
+        if { [regexp {^[0-9]{8}T[0-9]{6}$} [file rootname [file tail $f]]] } {
+            lappend named $f
+        } else {
+            lappend others $f
+        }
+    }
+    if { [llength $named] > 0 } {
+        # Every path shares the same directory prefix, so sorting the
+        # paths sorts the names.
+        foreach f [lrange [lsort -decreasing $named] 0 [expr {$cap - 1}]] {
+            if { $f ni $out } { lappend out $f }
+        }
+    } else {
+        set newest "" ; set newest_t 0
+        foreach f $others {
+            if { [catch { set t [file mtime $f] }] } { continue }
+            if { $t > $newest_t } { set newest_t $t ; set newest $f }
+        }
+        if { $newest ne "" && $newest ni $out } { lappend out $newest }
+    }
+    return $out
+}
+
+# Loads the loaded bean's last real shot into the live chart vectors.
+# Without this the home chart is blank every time you open the app until
+# you pull a shot -- the vectors are created empty at launch and only
 # filled as a shot runs; nothing in the app restores them.
 #
-# READ ONLY. It opens one history file and writes nothing. In particular it
-# does NOT copy the shot's `settings` block: the stock preview_history does
-# `array set ::settings $props(settings)`, which would replace your entire
-# current configuration -- grinder, dose, profile -- with whatever was saved
-# in that old shot. Only the curve vectors are taken.
-# With `path` set (0.30.0), that exact file is loaded instead of the newest
-# in history/ -- the bag cycler uses this so the chart and LAST SHOT card
-# describe the last shot OF THE BAG being cycled to, matching what the
-# grind tile has done since 0.22.0.
-proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
+# READ ONLY. It opens history files one at a time and writes nothing. In
+# particular it does NOT copy a shot's `settings` block: the stock
+# preview_history does `array set ::settings $props(settings)`, which would
+# replace your entire current configuration -- grinder, dose, profile --
+# with whatever was saved in that old shot. Only the curve vectors are
+# taken, plus what the LAST SHOT card reports.
+#
+#   force  0: the startup call, refused once the vectors hold samples.
+#          1: reload (SHE change, bag cycle, end of a cleaning run),
+#             refused while a shot is genuinely in progress.
+#   path   an exact file to load, as asked, with NO filtering -- for
+#          callers (and tests) that already chose the file.
+#   bag    the SDB bean_desc string whose last real shot is wanted;
+#          "" means the bag loaded now. The bag cycler passes the bag it
+#          just switched to (0.30.0 behaviour, now filtered like startup).
+proc ::lumen::load_last_shot_curves { {force 0} {path ""} {bag ""} } {
     if { !$force } {
         # Startup path, unchanged: never clobber a shot in progress. This
         # guard also makes the plain call a no-op forever after -- once a
@@ -2030,54 +2182,38 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
             msg -NOTICE "Lumen: requested shot file [file tail $path] does not exist"
             return
         }
-        set newest $path
-    } else {
-    set dir "[homedir]/history"
-    if { ![file isdirectory $dir] } { return }
-
-    # "Newest" means the most recent SHOT, which is not the most recently
-    # modified FILE (0.26.1).
-    #
-    # The app names every shot file YYYYMMDDTHHMMSS.shot, so sorting the names
-    # is sorting by shot time. Sorting by mtime is sorting by "when did
-    # anything last touch this file", and editing a shot's metadata in the
-    # Shot History Editor touches it: a July shot corrected today would become
-    # the file the home page describes, curves and all, until the next shot
-    # was pulled. Seen on the tablet on 2026-08-19 -- the log said "loaded
-    # last shot curves from 20260715T170133.shot" after that file was
-    # restamped, and the LAST SHOT card duly described a shot from a month
-    # earlier.
-    #
-    # mtime remains the fallback for any file whose name is not a timestamp,
-    # and is used only when NO file has a parseable one.
-    set named {} ; set others {}
-    foreach f [glob -nocomplain -directory $dir *.shot] {
-        if { [regexp {^[0-9]{8}T[0-9]{6}$} [file rootname [file tail $f]]] } {
-            lappend named $f
-        } else {
-            lappend others $f
-        }
-    }
-    set newest ""
-    if { [llength $named] > 0 } {
-        # Every path shares the same directory prefix, so sorting the paths
-        # sorts the names.
-        set newest [lindex [lsort $named] end]
-    } else {
-        set newest_t 0
-        foreach f $others {
-            if { [catch { set t [file mtime $f] }] } { continue }
-            if { $t > $newest_t } { set newest_t $t ; set newest $f }
-        }
-    }
-    if { $newest eq "" } { return }
-    }
-
-    if { [catch {
-        array set props [encoding convertfrom utf-8 [read_binary_file $newest]]
-    } err] } {
-        msg -ERROR "Lumen: could not read $newest: $err"
+        _load_shot_file $path 0
         return
+    }
+
+    set cands [last_shot_candidates $bag]
+    if { [llength $cands] == 0 } {
+        msg -INFO "Lumen: no shot files to load"
+        return
+    }
+    foreach f $cands {
+        if { [_load_shot_file $f 1] } { return }
+    }
+    msg -NOTICE "Lumen: none of [llength $cands] candidate shot files is a real espresso; chart left as-is"
+}
+
+# Reads ONE shot file into the chart vectors and the LAST SHOT record.
+# Returns 1 when loaded, 0 when unreadable or (strict) rejected by
+# _shot_reject_reason -- and a rejected file touches nothing, so the
+# previous record survives while the caller tries the next candidate.
+proc ::lumen::_load_shot_file { path strict } {
+    if { [catch {
+        array set props [encoding convertfrom utf-8 [read_binary_file $path]]
+    } err] } {
+        msg -ERROR "Lumen: could not read $path: $err"
+        return 0
+    }
+    if { $strict } {
+        set why [_shot_reject_reason props]
+        if { $why ne "" } {
+            msg -INFO "Lumen: skipping [file tail $path]: $why"
+            return 0
+        }
     }
     # Seed the last shot's profile from the file's own settings block. This
     # reads into a LOCAL array on purpose -- the stock preview_history does
@@ -2102,22 +2238,24 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
             # shot's number would linger on the card.
             array unset last_shot_rec
             array set last_shot_rec {}
-            foreach {key field} {grind grinder_setting \
-                                 dose  grinder_dose_weight \
-                                 yield drink_weight} {
+            foreach {key field} {grind   grinder_setting \
+                                 dose    grinder_dose_weight \
+                                 yield   drink_weight \
+                                 roaster bean_brand \
+                                 bean    bean_type} {
                 if { ![info exists _shot_settings($field)] } { continue }
                 set v [string trim $_shot_settings($field)]
                 if { $v eq "" } { continue }
-                # Grind is free text (clicks, letters, half-steps); the two
-                # weights must be real positive numbers or they are noise.
-                if { $key ne "grind" && ![::lumen::data::_is_pos $v] } { continue }
+                # Grind and the bean fields are free text; the two weights
+                # must be real positive numbers or they are noise.
+                if { $key in {dose yield} && ![::lumen::data::_is_pos $v] } { continue }
                 set last_shot_rec($key) $v
             }
         }
         array unset _shot_settings
     }
 
-    if { ![info exists props(espresso_elapsed)] } { return }
+    if { ![info exists props(espresso_elapsed)] } { return 1 }
 
     # A saved shot's first samples often repeat elapsed = 0.0 while the
     # y-values already move (captured before the shot timer starts). Plotted,
@@ -2202,7 +2340,8 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
         msg -ERROR "Lumen: could not mark the loaded shot as already saved: $err"
     }
 
-    msg -INFO "Lumen: loaded last shot curves from [file tail $newest] (history_saved marked)"
+    msg -INFO "Lumen: loaded last shot curves from [file tail $path] (history_saved marked)"
+    return 1
 }
 
 # Public entry point for plugins that change what history/ holds (0.28.0).
@@ -2220,7 +2359,8 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} } {
 #
 # Callers guard on [info procs ::lumen::refresh_after_history_change], so a
 # different skin simply skips this. Safe to call at any time: the loader's
-# reload guard refuses while a shot is in progress.
+# reload guard refuses while a shot is in progress. 0.43.0: the reload
+# lands on the LOADED bean's last real shot, not the globally newest file.
 proc ::lumen::refresh_after_history_change {} {
     if { [catch { load_last_shot_curves 1 } err] } {
         msg -ERROR "Lumen: history reload failed: $err"
@@ -2315,9 +2455,22 @@ proc ::lumen::glass_material {} {
 proc ::lumen::latch_shot_profile { args } {
     variable last_shot_profile
     variable last_shot_rec
+    variable last_flow_nonespresso
     catch {
         set p [string trim [::lumen::data::_s ::settings(profile_title)]]
         if { $p ne "" } { set last_shot_profile $p }
+    }
+    # 0.43.0: is the flow about to run a real espresso? The loaded
+    # profile carries beverage_type (cleaning / calibrate / espresso ...)
+    # and its title; either naming a non-espresso run arms
+    # after_flow_complete to put the bean's last real shot back.
+    set last_flow_nonespresso 0
+    catch {
+        foreach f {beverage_type profile_title} {
+            if { [text_is_nonespresso [::lumen::data::_s ::settings($f)]] } {
+                set last_flow_nonespresso 1
+            }
+        }
     }
     # A shot is starting, so the file those values came from is no longer the
     # last shot. Drop them (0.24.1 yield, 0.25.0 grind and dose): the live
@@ -2326,6 +2479,31 @@ proc ::lumen::latch_shot_profile { args } {
     # showing the live values or, for a yield that never arrives, "--".
     array unset last_shot_rec
     array set last_shot_rec {}
+}
+
+# Runs after every flow completes (0.43.0), registered through the core's
+# own ::de1::event::listener::after_flow_complete_add at skin load.
+#
+# Ordering is what makes this safe: the listener lists run first-in
+# first-out (event.tcl _generic, `after idle` per callback in registration
+# order), the core registers its history save in vars.tcl before the skin
+# is sourced (gui.tcl load_skin), so by the time this runs the cleaning
+# run's file is written and ::settings(history_saved) is 1 -- exactly the
+# state the loader's reload guard requires. With should_save_history off
+# the flag stays 0 and the reload is refused with a log line, never
+# forced.
+#
+# Only a flow that latch_shot_profile flagged as non-espresso triggers a
+# reload; a real shot leaves the live vectors alone (they ARE the last
+# shot). `args` is the core's event dict, unused.
+proc ::lumen::after_flow_complete { args } {
+    variable last_flow_nonespresso
+    if { !$last_flow_nonespresso } { return }
+    set last_flow_nonespresso 0
+    msg -INFO "Lumen: a non-espresso run finished; reloading the loaded bean's last real shot"
+    if { [catch { load_last_shot_curves 1 } err] } {
+        msg -ERROR "Lumen: reload after the non-espresso run failed: $err"
+    }
 }
 
 # Stamps when a flow page was last shown. See ::lumen::data::_flow_secs: the
@@ -3035,23 +3213,9 @@ proc ::lumen::act::_bag_clocks { bag } {
     return {}
 }
 
-# The newest shot FILE for a list of shot clocks (newest first), or "".
-#
-# No SDB query: the app names every shot file from its clock
-# (%Y%m%dT%H%M%S), which is the same filename-matching rule SDB itself
-# uses. A clock whose file is gone (soft-deleted in ShotHistoryEditor) is
-# skipped, so a bag whose latest shot sits in the trash falls back to its
-# next-newest -- the same tolerance the workspace rules require of SDB
-# consumers.
-proc ::lumen::act::_bag_last_shot_file { clocks } {
-    foreach c $clocks {
-        if { [catch {
-            set f "[homedir]/history/[clock format $c -format %Y%m%dT%H%M%S].shot"
-        }] } { continue }
-        if { [file isfile $f] } { return $f }
-    }
-    return ""
-}
+# (0.43.0: _bag_last_shot_file is gone -- the cycler loads through
+# ::lumen::load_last_shot_curves with the bag name, the same resolver as
+# startup, so the bag's cleaning runs are skipped here too.)
 
 proc ::lumen::act::cycle_bag { dir } {
     if { [catch {
@@ -3101,16 +3265,12 @@ proc ::lumen::act::cycle_bag { dir } {
         msg -INFO "Lumen: next shot bag set to '$want'"
 
         # 0.30.0 (owner request): the chart and LAST SHOT card follow the
-        # bag, like the grind tile has since 0.22.0. Load the cycled bag's
-        # newest shot file; failure here must not undo the cycle itself,
-        # which has already succeeded.
-        set f [_bag_last_shot_file $clocks]
-        if { $f ne "" } {
-            if { [catch { ::lumen::load_last_shot_curves 1 $f } lerr] } {
-                msg -ERROR "Lumen: could not load '$want' last shot: $lerr"
-            }
-        } else {
-            msg -NOTICE "Lumen: no shot file on disk for bag '$want' (all in trash?); chart left as-is"
+        # bag, like the grind tile has since 0.22.0. 0.43.0: through the
+        # shared resolver, so the bag's last REAL shot is what loads (a
+        # cleaning run recorded under this bag is skipped). Failure here
+        # must not undo the cycle itself, which has already succeeded.
+        if { [catch { ::lumen::load_last_shot_curves 1 "" $want } lerr] } {
+            msg -ERROR "Lumen: could not load '$want' last shot: $lerr"
         }
     } err] } {
         msg -ERROR "Lumen: could not cycle the bean bag: $err"
@@ -4405,6 +4565,15 @@ unset -nocomplain _p
 # skin loading -- the value simply stays at whatever startup seeded.
 if { [catch { dui page add_action espresso show ::lumen::latch_shot_profile } err] } {
     msg -ERROR "Lumen: could not hook the shot-profile latch: $err"
+}
+
+# 0.43.0: after a cleaning / calibration run the live vectors hold that
+# run, so the home chart would keep showing it until the next real shot.
+# The core's own after-flow event, registered here AFTER the core's
+# history save (see ::lumen::after_flow_complete for why the order holds),
+# puts the loaded bean's last real shot back.
+if { [catch { ::de1::event::listener::after_flow_complete_add ::lumen::after_flow_complete } err] } {
+    msg -ERROR "Lumen: could not hook after_flow_complete: $err"
 }
 
 # Each flow page stamps when it was shown, so its timer can tell the flow it
