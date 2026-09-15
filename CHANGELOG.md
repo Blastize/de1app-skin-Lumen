@@ -4,9 +4,11 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.43.1 - polish batch from the 2026-09-15 review
+## 0.43.1 - polish batch from the 2026-09-15 review - TABLET-VERIFIED 2026-09-15 (dark theme: home + settings screenshots; "Tap to retry" seen after 30 s; light theme and the espresso-page note not yet eyeballed)
 
-Base: 0.43.0. **Safety status: unchanged. No new writes; the one new read is
+Base: 0.43.0. Lesson from the first push: the loader restores only the chart's
+pre-scaled weight/temperature vectors, so the legend reads those (x10), not
+the raw ones. **Safety status: unchanged. No new writes; the one new read is
 the shot file's top-level `clock`, latched with the rest of the record.**
 
 - Confidence band coloured by meaning: Good/Excellent green, Poor amber, Fair

@@ -1491,17 +1491,23 @@ proc ::lumen::data::_vec_last { vec } {
     return $v
 }
 
-proc ::lumen::data::_legend { word vec unit {dp 1} } {
+proc ::lumen::data::_legend { word vec unit {mult 1.0} } {
     set v [_vec_last $vec]
     if { $v eq "" } { return [translate $word] }
-    return "[translate $word] [format %.${dp}f $v]$unit"
+    return "[translate $word] [format %.1f [expr {$v * $mult}]]$unit"
 }
 
+# Weight and temperature read the vectors the chart PLOTS -- the app's
+# pre-scaled espresso_weight_chartable (0.10 x g) and
+# espresso_temperature_basket10th (degrees / 10) -- times ten. The raw
+# espresso_weight / espresso_temperature_basket vectors are not what the
+# loader restores from a shot file (tablet, 0.43.1 first push: those two
+# legend entries stayed bare words), and the chartable pair is filled
+# both by the loader and by the app during a live shot.
 proc ::lumen::data::legend_pressure {} { return [_legend "Pressure" espresso_pressure " bar"] }
 proc ::lumen::data::legend_flow {}     { return [_legend "Flow" espresso_flow " mL/s"] }
-proc ::lumen::data::legend_weight {}   { return [_legend "Weight" espresso_weight " g"] }
-# The basket vector is in degrees; the chart plots it /10.
-proc ::lumen::data::legend_temp {}     { return [_legend "Temp" espresso_temperature_basket "C"] }
+proc ::lumen::data::legend_weight {}   { return [_legend "Weight" espresso_weight_chartable " g" 10.0] }
+proc ::lumen::data::legend_temp {}     { return [_legend "Temp" espresso_temperature_basket10th "[format %c 0xB0]C" 10.0] }
 
 # When the LAST shot was pulled (0.43.1): the file's clock, latched with the
 # rest of the record; in-session (record cleared at shot start) the core's
