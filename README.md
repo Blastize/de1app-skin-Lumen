@@ -8,7 +8,14 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.43.1 — every page built, baked and running on the tablet.**
+**Version 0.44.0 — every page built, baked and running on the tablet.**
+
+New in 0.44.0: the **tank-empty page** is a Lumen page. When the machine
+runs dry it used to drop into the default skin's cracked-earth photo; now
+it shows a glass panel with "Please add water", the app's own "Touch
+screen to retry" hint, and the live tank reading so you can watch the
+level rise as you pour. The three taps are exactly the stock ones: the
+screen retries, bottom-left exits the app, bottom-right is Ok.
 
 New in 0.43.1 (polish): the confidence band is coloured by what it says
 (green for Good, amber for Poor), the LAST SHOT card says **when** the
@@ -196,8 +203,8 @@ the frosted panels are composited offline into background PNGs — real
 translucency, blurred backdrops, soft shadows and specular edges — and the
 skin draws only text, the chart widget and tap targets on top.
 
-As of 0.20.0 **every** page is baked, not just home. Four images cover the
-five pages:
+As of 0.20.0 **every** page is baked, not just home. Five images cover
+the seven pages:
 
 | Image | Page |
 |---|---|
@@ -205,6 +212,7 @@ five pages:
 | `lumen_settings` | Lumen settings |
 | `lumen_flow_chart` | espresso (compact layout, live chart) |
 | `lumen_flow` | steam, water, hotwaterrinse |
+| `lumen_message` | tankempty, refill (the out-of-water page, 0.44.0) |
 
 The three roomy flow pages share one image because `build_flow_page` draws
 identical panels for all three — only the label text differs, and text is not
@@ -353,4 +361,6 @@ The rounded-panel primitive is the same smoothed-polygon mechanism used in
 the GrindAdvisor plugin. The stop-button bindings on the espresso, steam and
 water pages are copied verbatim from `skins/default/standard_stop_buttons.tcl`.
 The stock settings, firmware, descale and profile-editor pages come from
-`skins/default/standard_includes.tcl` and are untouched.
+`skins/default/standard_includes.tcl` and are untouched; only its
+out-of-water page is re-declared by Lumen (0.44.0), keeping its tap
+commands verbatim.

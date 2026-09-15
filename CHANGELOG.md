@@ -4,6 +4,30 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.44.0 - the tank-empty page is a Lumen page
+
+Base: 0.43.1. **Safety status: unchanged. No writes; the page's three tap
+commands are the stock ones, copied verbatim (start_refill_kit twice, the
+stock Exit App sequence through the message page + app_exit).**
+
+- The stock `tankempty refill` pages (cracked-earth fill_tank.jpg from
+  skins/default/standard_includes.tcl) are deleted with dui's own
+  `page delete` right after that file is sourced and re-declared on a new
+  baked `lumen_message[_light].png` (centred panel, two bottom pills inside
+  the stock Exit App / Ok zones). Both pages join `baked_pages`.
+- Content: "Please add water" title, a one-line explanation, the core's
+  own retry hint (`refill_kit_retry_button`), and the live tank reading in
+  the taskbar's blue/amber pair so the level can be watched rising. Press
+  flash: ring on the panel for the retry zone, label chips on the pills.
+- make_backgrounds.py: MESSAGE_PANELS / MESSAGE_INNER + the `message` page;
+  every existing PNG re-baked byte-identical (only the four new files
+  appeared), palette samples unchanged.
+- Harness: page add/delete recorded by the dui stub; asserts delete-then-add
+  on lumen_message, the five stock zones with their commands, pills inside
+  the zones; `refill_kit_retry_button` stubbed.
+
+Files: skin.tcl, tools/make_backgrounds.py, tools/check_skin.tcl, 4 new PNGs, docs.
+
 ## 0.43.1 - polish batch from the 2026-09-15 review - TABLET-VERIFIED 2026-09-15 (dark theme: home + settings screenshots; "Tap to retry" seen after 30 s; light theme and the espresso-page note not yet eyeballed)
 
 Base: 0.43.0. Lesson from the first push: the loader restores only the chart's

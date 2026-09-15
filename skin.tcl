@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.43.1  (polish batch from the 2026-09-15 review; see `variable version`)
+#  Version: 0.44.0  (the tank-empty page is a Lumen page; see `variable version`)
 #
 #
 #
@@ -93,7 +93,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.43.1"
+    variable version "0.44.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -114,8 +114,11 @@ namespace eval ::lumen {
     # and the four flow pages fell through to the vector `glass` primitive --
     # flat fills, a hard line along the top edge only, no shadow -- and read
     # a generation behind the home screen.
+    # 0.44.0: the stock tank-empty pages (tankempty refill) are re-declared
+    # on lumen_message, so they are baked too.
     variable baked_pages [list off lumen_settings \
-                               espresso steam water hotwaterrinse]
+                               espresso steam water hotwaterrinse \
+                               tankempty refill]
 
     variable theme_mode   "dark"
     variable pending_theme ""   ;# set when a theme change needs a restart
@@ -569,6 +572,22 @@ proc ::lumen::_init_layout {} {
     set L(fc_panel_x)   170  ; set L(fc_panel_y)  520
     set L(fc_panel_w)  1000  ; set L(fc_panel_h)  150
     set L(fc_hint_y)    700
+
+    # ---- tank-empty page (0.44.0) --------------------------------------
+    #
+    # The stock `tankempty refill` pages, re-declared on a baked Lumen
+    # background. One centred panel carries the message; the two pills sit
+    # INSIDE the stock tap zones, which are copied verbatim (design px:
+    # retry 0..1340 x 0..700, Exit App 0..419 x 701..800, Ok 921..1340 x
+    # 701..800). make_backgrounds.py MESSAGE_* mirrors these numbers.
+    set L(msg_panel_x) 270 ; set L(msg_panel_y) 200
+    set L(msg_panel_w) 800 ; set L(msg_panel_h) 300
+    set L(msg_title_y) 240
+    set L(msg_body_y)  306
+    set L(msg_retry_y) 392
+    set L(msg_water_y) 440
+    set L(msg_btn_y)   714 ; set L(msg_btn_w) 240 ; set L(msg_btn_h) 72
+    set L(msg_exit_x)   90 ; set L(msg_ok_x) 1010
 
     # ---- settings page grid --------------------------------------------
     #
@@ -3697,6 +3716,23 @@ dui page add espresso      -bg_img "lumen_flow_chart$::lumen::_bg_suffix.png"
 dui page add [list steam water hotwaterrinse] \
                            -bg_img "lumen_flow$::lumen::_bg_suffix.png"
 
+# 0.44.0: the tank-empty page. standard_includes.tcl (sourced above)
+# declares `tankempty refill` on the default skin's cracked-earth
+# fill_tank.jpg with its own text and buttons; dui refuses a second
+# declaration of an existing page, so the pair is deleted first (dui's
+# own `page delete`, which drops the items and the page data) and
+# re-added on Lumen's baked image. build_message_page redraws the
+# content: the stock tap zones verbatim, Lumen type on top. Neither page
+# can be current while the skin loads, so the delete never refuses.
+if { [catch { dui page delete [list tankempty refill] } err] } {
+    msg -ERROR "Lumen: could not remove the stock tank-empty pages: $err"
+}
+if { [catch {
+    dui page add [list tankempty refill] -bg_img "lumen_message$::lumen::_bg_suffix.png"
+} err] } {
+    msg -ERROR "Lumen: could not declare the tank-empty page: $err"
+}
+
 .can configure -bg $::lumen::C(bg)
 
 #############################################################################
@@ -4263,6 +4299,63 @@ proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_l
 }
 
 #############################################################################
+#  Tank-empty page (0.44.0)
+#
+#  The machine switches to `tankempty` on its own (gui.tcl: state Refill).
+#  Content and tap zones follow skins/default/standard_includes.tcl's
+#  "out of water page" block exactly -- the same three zones with the same
+#  commands (retry = start_refill_kit over the top 1400 virtual px; Exit
+#  App bottom-left through the stock message page + app_exit; Ok
+#  bottom-right = start_refill_kit) -- with Lumen's type and the live tank
+#  reading so you can watch the level rise as you pour.
+#############################################################################
+
+proc ::lumen::build_message_page {} {
+    variable C
+    variable L
+    set pages [list tankempty refill]
+
+    foreach p $pages {
+        txt $p $L(center_x) $L(msg_title_y) [translate "Please add water"] \
+            -font $L(font_title) -fill $C(ink) -anchor n -justify center
+        txt $p $L(center_x) $L(msg_body_y) \
+            [translate "The tank is empty. Fill it and the machine carries on where it left off."] \
+            -font $L(font_body) -fill $C(ink_2) -anchor n -justify center \
+            -width [expr {$L(msg_panel_w) - 2 * $L(xl)}]
+        # The core's own retry hint ("Touch screen to retry" once the
+        # machine reports a substate), exactly as the stock page shows it.
+        var $p $L(center_x) $L(msg_retry_y) {[refill_kit_retry_button]} \
+            -font $L(font_body) -fill $C(crema) -anchor n -justify center
+        # Live tank level, the taskbar's two stacked items (blue / amber).
+        var $p $L(center_x) $L(msg_water_y) {[::lumen::data::water_ml]} \
+            -font $L(font_data) -fill $C(c_flow) -anchor n -justify center
+        var $p $L(center_x) $L(msg_water_y) {[::lumen::data::water_ml_low]} \
+            -font $L(font_data) -fill $C(warn) -anchor n -justify center
+    }
+
+    # Button labels. Exit App exists on tankempty only (as in the stock
+    # file); Ok on both.
+    txt tankempty [expr {$L(msg_exit_x) + $L(msg_btn_w) / 2.0}] \
+        [expr {$L(msg_btn_y) + $L(msg_btn_h) / 2.0}] [translate "Exit App"] \
+        -font $L(font_button) -fill $C(ink_2) -anchor center -justify center
+    foreach p $pages {
+        txt $p [expr {$L(msg_ok_x) + $L(msg_btn_w) / 2.0}] \
+            [expr {$L(msg_btn_y) + $L(msg_btn_h) / 2.0}] [translate "Ok"] \
+            -font $L(font_button) -fill $C(crema) -anchor center -justify center
+    }
+
+    # The three stock zones, VERBATIM from standard_includes.tcl (virtual
+    # coordinates as written there), each with a press flash in front: the
+    # retry zone rings the message panel (the grind-card style -- a filled
+    # chip over 1400 virtual px would flood the screen), the two corner
+    # buttons get label-fitted chips.
+    set ring [list ring $L(msg_panel_x) $L(msg_panel_y) $L(msg_panel_w) $L(msg_panel_h)]
+    add_de1_button "tankempty refill" "::lumen::press_flash 0 0 2560 1400 [list $ring]; say \[translate {awake}\] \$::settings(sound_button_in);start_refill_kit" 0 0 2560 1400
+    add_de1_button "tankempty" {::lumen::press_flash 0 1402 800 1600 label; say [translate {Exit}] $::settings(sound_button_in); .can itemconfigure $::message_label -text [translate "Going to sleep"]; .can itemconfigure $::message_button_label -text [translate "Wait"]; after 10000 {.can itemconfigure $::message_button_label -text [translate "Ok"]; }; set_next_page off message; page_show message; after 500 app_exit} 0 1402 800 1600
+    add_de1_button "tankempty refill" {::lumen::press_flash 1760 1402 2560 1600 label; say [translate {awake}] $::settings(sound_button_in);start_refill_kit} 1760 1402 2560 1600
+}
+
+#############################################################################
 #  Lumen settings page
 #
 #  Reached from the rail's Settings button. Lumen's own preferences live
@@ -4530,6 +4623,7 @@ proc ::lumen::build_settings {} {
 
 ::lumen::build_home
 ::lumen::build_settings
+::lumen::build_message_page
 
 # Each page gets ITS OWN timer. Sharing espresso_secs across all of them
 # reported time-since-the-last-espresso on the water and flush pages -- see
