@@ -4,7 +4,7 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.44.0 - the tank-empty page is a Lumen page
+## 0.44.0 - the tank-empty page is a Lumen page - TABLET-VERIFIED 2026-09-15 (dark theme via DevBridge page load: panel, title, body, live "760 ml", Exit App / Ok pills in the stock zones; retry hint blank while idle, as the core intends; light theme checked as the baked image only)
 
 Base: 0.43.1. **Safety status: unchanged. No writes; the page's three tap
 commands are the stock ones, copied verbatim (start_refill_kit twice, the
