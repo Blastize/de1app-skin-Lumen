@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.43.0  (the chart shows the last REAL shot of the loaded bean; see `variable version`)
+#  Version: 0.43.1  (polish batch from the 2026-09-15 review; see `variable version`)
 #
 #
 #
@@ -65,9 +65,10 @@ package require de1plus 1.0
 #  These are persisted with save_settings and sent to the machine with the
 #  core's own save_settings_to_de1, debounced by 1s (Streamline's pattern).
 #
-#  It hands off to three plugins -- GrindAdvisor's result popup, DYE's
-#  next-shot editor, Bean Scanner's capture page -- and any writing those do
-#  is their own, behind their own confirmation.
+#  It hands off to plugins -- GrindAdvisor, DYE, Bean Scanner, Shot History
+#  Editor, MaintenanceTracker, Drink Menu -- through their public entry
+#  points, and any writing those do is their own, behind their own
+#  confirmation.
 #
 #  ---------------------------------------------------------------------
 #  Two scale sources (see de1app-core/dui.tcl):
@@ -92,7 +93,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.43.0"
+    variable version "0.43.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -203,7 +204,9 @@ proc ::lumen::set_palette { mode } {
 
         set C(ink)         "#121826"
         set C(ink_2)       "#4A5568"
-        set C(ink_3)       "#7C8798"
+        # 0.43.1: was #7C8798, ~3.4:1 on the card fill -- under the 4.5:1
+        # normal-text guideline for the 15-16 px labels. #65708A is ~4.7:1.
+        set C(ink_3)       "#65708A"
 
         set C(crema)       "#C2761B"
         set C(crema_lo)    "#E4DDD7"
@@ -241,7 +244,9 @@ proc ::lumen::set_palette { mode } {
 
         set C(ink)         "#F0F4FA"
         set C(ink_2)       "#AFBBCC"
-        set C(ink_3)       "#74829A"
+        # 0.43.1: was #74829A, ~4.3:1 on the card fill; #8290A8 is ~5.1:1.
+        # Still clearly the tertiary step below ink_2.
+        set C(ink_3)       "#8290A8"
 
         set C(crema)       "#F0A63C"
         set C(crema_lo)    "#282219"
@@ -575,12 +580,12 @@ proc ::lumen::_init_layout {} {
     # Left 170..630 (460 wide), right 670..1170 (500 wide) -- 170 clear on
     # BOTH page edges, one md gap between the columns.
     #
-    # 0.24.0 briefly made them equal, for a build where DECENT APP sat in the
-    # left column: its 200-wide button does not clear the caption beside it
-    # inside 460. The owner then placed DECENT APP bottom-RIGHT instead, so
-    # the wide column holds every button again and these are back to the
-    # tablet-verified 460 / 500. Do not "tidy" them to equal widths without
-    # moving a button first.
+    # 0.24.0 briefly made them equal; a 200-wide button does not clear the
+    # caption beside it inside 460, so the wide right column holds every
+    # button and these are the tablet-verified 460 / 500. Do not "tidy" them
+    # to equal widths without moving a button first. (The DECENT APP row
+    # itself is gone since 0.42.0 -- the taskbar's DE1 icon opens the app
+    # settings -- which is why the right column's fourth slot is empty.)
     set L(set_col_l)  170 ; set L(set_col_l_w) 460
     set L(set_col_r)  670 ; set L(set_col_r_w) 500
     set L(set_row_h)  118 ; set L(set_rows) {110 244 378 512}
@@ -1143,6 +1148,33 @@ proc ::lumen::data::grind_band {} {
     return $band
 }
 
+# 0.43.1: the band line was always green, so "Poor - 2 shots" looked as
+# reassuring as "Good - 11 shots". Three stacked fixed-colour items share
+# the spot (the maintenance-dot pattern); the text moves between them.
+# GrindAdvisor's bands are Poor / Fair / Good / Excellent (_confidence_band).
+# The starting-estimate line and anything unrecognised take the neutral
+# item, so nothing ever goes missing.
+proc ::lumen::data::_band_word {} {
+    set rec [grind_rec]
+    if { $rec eq "" } { return "" }
+    return [string tolower [string trim [_g $rec confidence_band]]]
+}
+
+proc ::lumen::data::grind_band_good {} {
+    if { [_band_word] in {good excellent} } { return [grind_band] }
+    return ""
+}
+
+proc ::lumen::data::grind_band_poor {} {
+    if { [_band_word] eq "poor" } { return [grind_band] }
+    return ""
+}
+
+proc ::lumen::data::grind_band_neutral {} {
+    if { [_band_word] in {good excellent poor} } { return "" }
+    return [grind_band]
+}
+
 # Regression needs 3 shots on a bag before it can forecast. Say so plainly
 # rather than showing a number the model cannot justify.
 proc ::lumen::data::grind_note {} {
@@ -1247,7 +1279,8 @@ proc ::lumen::data::last_ratio {} {
     set y [_yield_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
     if { [catch { set r [expr {double($y) / double($d)}] }] } { return "--" }
-    return [format "1:%.2f" $r]
+    # One decimal, matching the NEXT SHOT card (0.43.1; was two).
+    return [format "1:%.1f" $r]
 }
 
 # The ratio as it appears UNDER the last shot's yield (0.23.0), matching the
@@ -1446,6 +1479,64 @@ proc ::lumen::data::last_profile {} {
     return [_ellipsis $v 22]
 }
 
+# ---- chart legend with final values (0.43.1) ------------------------------
+#
+# The last sample of a live vector, or "" when the vector holds no shot
+# (a cleared vector reads length 1 with a leading 0, so <= 1 is empty).
+# In-memory BLT reads only; no file, no plugin.
+proc ::lumen::data::_vec_last { vec } {
+    if { [catch { set n [$vec length] }] || $n <= 1 } { return "" }
+    if { [catch { set v [$vec range end end] }] } { return "" }
+    if { ![string is double -strict $v] } { return "" }
+    return $v
+}
+
+proc ::lumen::data::_legend { word vec unit {dp 1} } {
+    set v [_vec_last $vec]
+    if { $v eq "" } { return [translate $word] }
+    return "[translate $word] [format %.${dp}f $v]$unit"
+}
+
+proc ::lumen::data::legend_pressure {} { return [_legend "Pressure" espresso_pressure " bar"] }
+proc ::lumen::data::legend_flow {}     { return [_legend "Flow" espresso_flow " mL/s"] }
+proc ::lumen::data::legend_weight {}   { return [_legend "Weight" espresso_weight " g"] }
+# The basket vector is in degrees; the chart plots it /10.
+proc ::lumen::data::legend_temp {}     { return [_legend "Temp" espresso_temperature_basket "C"] }
+
+# When the LAST shot was pulled (0.43.1): the file's clock, latched with the
+# rest of the record; in-session (record cleared at shot start) the core's
+# espresso_clock, which is that shot's own clock. "Today 15:05",
+# "Yesterday 14:24", else "Fri 12 Sep 12:40" -- honouring the CLOCK row's
+# 12/24 h and day-month preferences. Blank when nothing is known.
+proc ::lumen::data::last_shot_when {} {
+    set c [_rec clock]
+    if { $c eq "" } { set c [_s ::settings(espresso_clock)] }
+    if { ![string is integer -strict $c] || $c <= 0 } { return "" }
+    set now [clock seconds]
+    set tf [expr {[::lumen::time_format] == 12 ? "%I:%M %p" : "%H:%M"}]
+    if { [catch {
+        set day  [clock format $c -format %Y-%m-%d]
+        set t    [clock format $c -format $tf]
+        if { $day eq [clock format $now -format %Y-%m-%d] } {
+            set out "[translate Today] $t"
+        } elseif { $day eq [clock format [expr {$now - 86400}] -format %Y-%m-%d] } {
+            set out "[translate Yesterday] $t"
+        } else {
+            set df [expr {[::lumen::date_format] eq "mdy" ? "%a %b %d" : "%a %d %b"}]
+            set out "[clock format $c -format $df] $t"
+        }
+    }] } { return "" }
+    return $out
+}
+
+# The target under the live weight on the espresso page (0.43.1): what you
+# are pouring towards. Blank when no target is set (a cleaning profile).
+proc ::lumen::data::target_yield_note {} {
+    set y [_target_raw]
+    if { ![_is_pos $y] } { return "" }
+    return "[translate of] [_num $y 1] g"
+}
+
 # Live scale weight for the flow pages. Shows "--" rather than blank here,
 # because on those pages the column always needs to read as a value.
 # Blank once the chart has data. An empty BLT graph autoscales x to
@@ -1597,7 +1688,9 @@ proc ::lumen::data::steam_value {} {
 
 proc ::lumen::data::steam_value_alt {} {
     if { [::lumen::steam_mode] eq "flow" } { return [steam_time_value] }
-    return [steam_flow_value]
+    # 0.43.1: WITH its unit -- as the small line it has no FLOW label to
+    # lean on, and a bare "2.5" under "35s" read as nothing in particular.
+    return [steam_flow_note]
 }
 
 proc ::lumen::data::water_value {} {
@@ -1662,15 +1755,17 @@ proc ::lumen::data::theme_label {} {
     return [translate "Light"]
 }
 
+# 0.43.1 copy: the app CLOSES and cannot reopen itself (Android 16, see
+# restart_for_theme); "restarts" promised something it never did.
 proc ::lumen::data::theme_note {} {
     if { $::lumen::pending_theme eq "" \
       || $::lumen::pending_theme eq $::lumen::theme_mode } {
-        return [translate "Tap to switch. The app restarts to apply it."]
+        return [translate "Tap to switch. The app closes; reopen it to apply."]
     }
     if { $::lumen::pending_theme eq "light" } {
-        return [translate "Light selected. Tap Done and the app will restart."]
+        return [translate "Light selected. Tap Done: the app closes, reopen it."]
     }
-    return [translate "Dark selected. Tap Done and the app will restart."]
+    return [translate "Dark selected. Tap Done: the app closes, reopen it."]
 }
 
 proc ::lumen::data::version_line {} {
@@ -1731,7 +1826,7 @@ proc ::lumen::data::bag_position {} {
 # (bluetooth.tcl:2640-2645), so it stays fresh for as long as there is a
 # reading to show -- including while the machine is idle. 10s is the core's
 # own staleness threshold (bluetooth.tcl:1693).
-proc ::lumen::data::water_ml {} {
+proc ::lumen::data::_water_ml_num {} {
     set ping 0
     catch { set ping $::de1(last_ping) }
     if { ![string is double -strict $ping] || $ping <= 0 } { return "" }
@@ -1741,7 +1836,25 @@ proc ::lumen::data::water_ml {} {
     if { ![string is double -strict $mm] || $mm <= 0 } { return "" }
     if { [catch { set ml [water_tank_level_to_milliliters $mm] }] } { return "" }
     if { ![string is double -strict $ml] } { return "" }
-    return "[expr {round($ml)}] ml"
+    return [expr {round($ml)}]
+}
+
+# 0.43.1: the readout warns. Under 300 ml (a couple of shots plus a flush)
+# the value moves from the blue item to an amber one -- two stacked
+# fixed-colour items, the maintenance-dot pattern. The number itself is
+# unchanged; only which item carries it.
+proc ::lumen::water_low_ml {} { return 300 }
+
+proc ::lumen::data::water_ml {} {
+    set ml [_water_ml_num]
+    if { $ml eq "" || $ml < [::lumen::water_low_ml] } { return "" }
+    return "$ml ml"
+}
+
+proc ::lumen::data::water_ml_low {} {
+    set ml [_water_ml_num]
+    if { $ml eq "" || $ml >= [::lumen::water_low_ml] } { return "" }
+    return "$ml ml"
 }
 
 # (0.34.0: water_label is gone with the card corner readout; the taskbar
@@ -1867,15 +1980,37 @@ proc ::lumen::data::scale_connecting {} {
     return $c
 }
 
+# 0.43.1: "Connecting" with no exit. With the scale switched off the core's
+# connect handle stays non-zero indefinitely, so the readout said
+# "Connecting" for hours and nothing hinted that the box is the retry
+# button. After 30 s of one continuous attempt it says "Tap to retry"
+# instead. The stamp lives here, in memory, on the tick; a fresh attempt
+# (handle back to 0 in between) restarts the window.
+namespace eval ::lumen::data {
+    variable connecting_since 0
+}
+
+proc ::lumen::data::_connecting_text {} {
+    variable connecting_since
+    set now [clock seconds]
+    if { $connecting_since <= 0 } { set connecting_since $now }
+    if { $now - $connecting_since > 30 } { return [translate "Tap to retry"] }
+    return [translate "Connecting"]
+}
+
 proc ::lumen::data::scale_weight_line {} {
+    variable connecting_since
     if { ![scale_connected] } {
         # No paired scale at all -- there is nothing to reconnect to.
         if { [_s ::settings(scale_bluetooth_address)] eq "" } {
+            set connecting_since 0
             return [translate "no scale"]
         }
-        if { [scale_connecting] } { return [translate "Connecting"] }
+        if { [scale_connecting] } { return [_connecting_text] }
+        set connecting_since 0
         return [translate "Connect"]
     }
+    set connecting_since 0
     set w [_s ::de1(scale_weight)]
     if { $w eq "" } { return "--" }
     # An idle scale drifts a hair below zero and %.1f then prints "-0.0",
@@ -2238,6 +2373,13 @@ proc ::lumen::_load_shot_file { path strict } {
             # shot's number would linger on the card.
             array unset last_shot_rec
             array set last_shot_rec {}
+            # 0.43.1: the file's top-level clock joins the record (the
+            # LAST SHOT card's "Today 15:05" line). It is not in the
+            # settings block, so it is latched here, before the loop.
+            if { [info exists props(clock)] \
+              && [string is integer -strict [string trim $props(clock)]] } {
+                set last_shot_rec(clock) [string trim $props(clock)]
+            }
             foreach {key field} {grind   grinder_setting \
                                  dose    grinder_dose_weight \
                                  yield   drink_weight \
@@ -3597,6 +3739,9 @@ proc ::lumen::build_home {} {
     # same blue, blank when the machine has not reported recently.
     var $p $L(bar_water_x) $bar_mid {[::lumen::data::water_ml]} \
         -font $L(font_data) -fill $C(c_flow) -anchor e -justify right
+    # 0.43.1: the same value in amber when the tank runs low.
+    var $p $L(bar_water_x) $bar_mid {[::lumen::data::water_ml_low]} \
+        -font $L(font_data) -fill $C(warn) -anchor e -justify right
 
     set sym_ok [_font_family_ok symbol]
     set bar_font [expr {$sym_ok ? $L(font_bt) : $L(font_label)}]
@@ -3654,8 +3799,10 @@ proc ::lumen::build_home {} {
     set gmid [expr {$L(grind_x) + $L(grind_w) / 2.0}]
     var $p $gmid [expr {$gy + 20}] {[::lumen::data::grind_next]} \
         -font $L(font_hero) -fill $C(crema) -anchor n -justify center
+    # 0.43.1: the delta in the secondary ink, not green -- it is a
+    # direction, not a verdict.
     var $p [expr {$gmid + 120}] [expr {$gy + 60}] {[::lumen::data::grind_delta]} \
-        -font $L(font_primary) -fill $C(good)
+        -font $L(font_primary) -fill $C(ink_2)
 
     var $p $gmid [expr {$gy + 106}] {[::lumen::data::grind_note]} \
         -font $L(font_body) -fill $C(ink_2) -width 560 \
@@ -3668,8 +3815,13 @@ proc ::lumen::build_home {} {
     var $p [expr {$mchip_x + 75}] [expr {$gy + 13}] {[::lumen::data::grind_method]} \
         -font $L(font_label) -fill $C(crema) -anchor center -justify center
 
-    var $p $gx [expr {$gy + 140}] {[::lumen::data::grind_band]} \
-        -font $L(font_caption) -fill $C(good)
+    # Confidence band: three stacked items, coloured by what it says.
+    foreach {code col} [list \
+        {[::lumen::data::grind_band_good]}    $C(good) \
+        {[::lumen::data::grind_band_poor]}    $C(warn) \
+        {[::lumen::data::grind_band_neutral]} $C(ink_2)] {
+        var $p $gx [expr {$gy + 140}] $code -font $L(font_caption) -fill $col
+    }
 
     txt $p [expr {$L(grind_x) + $L(grind_w) - $L(pad_x)}] \
         [expr {$gy + 140}] \
@@ -3766,6 +3918,15 @@ proc ::lumen::build_home {} {
     tap $p [expr {$lh_r - 150}] [expr {$L(hist_y) - 8}] 150 40 \
         {::lumen::act::shot_history} "Shot history" label
 
+    # 0.43.1: WHEN the shot was pulled, on the same bottom row at the
+    # card's left edge -- the card can now legitimately describe a shot
+    # from days ago (a bag with only a cleaning run since, or a fresh bag
+    # showing the previous bag's last shot), and it never said so. Widest
+    # string "Wed 12 Sep 12:40 PM" is ~150 px at the caption size, ending
+    # near 860; the Shot history zone starts at 1150.
+    var $p $lx $L(hist_y) {[::lumen::data::last_shot_when]} \
+        -font $L(font_caption) -fill $C(ink_3)
+
     ####################################################################
     #  Shot chart   (real graph widget added in Pass 3)
     ####################################################################
@@ -3774,13 +3935,18 @@ proc ::lumen::build_home {} {
     set cx [expr {$L(chart_x) + $L(pad_x)}]
     set cy [expr {$L(chart_y) + $L(md)}]
 
+    # 0.43.1: each legend entry carries the shot's final value with its
+    # unit ("Weight 38.0 g", "Temp 93.2 C"), so the shared 0..10 axis is
+    # readable -- 9.3 on the temperature line is 93 degrees, 3.8 on the
+    # weight line is 38 g. Plain words until there is a shot. Pitch 170
+    # (was 110) for the longer strings; 4 x 170 = 680 of the 1260 inside.
     set i 0
-    foreach {nm col} [list \
-        [translate "Pressure"] $C(c_press) \
-        [translate "Flow"]     $C(c_flow) \
-        [translate "Weight"]   $C(c_weight) \
-        [translate "Temp"]     $C(c_temp) ] {
-        txt $p [expr {$cx + $i * 110}] $cy $nm \
+    foreach {code col} [list \
+        {[::lumen::data::legend_pressure]} $C(c_press) \
+        {[::lumen::data::legend_flow]}     $C(c_flow) \
+        {[::lumen::data::legend_weight]}   $C(c_weight) \
+        {[::lumen::data::legend_temp]}     $C(c_temp) ] {
+        var $p [expr {$cx + $i * 170}] $cy $code \
             -font $L(font_caption) -fill $col
         incr i
     }
@@ -4006,7 +4172,7 @@ proc ::lumen::build_home {} {
 #  the tablet shows a blank screen for the whole shot.
 #############################################################################
 
-proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_label "TEMP"} {temp_note_code ""} } {
+proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_label "TEMP"} {temp_note_code ""} {weight_note_code ""} } {
     variable C
     variable L
 
@@ -4077,6 +4243,12 @@ proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_l
     if { $temp_note_code ne "" } {
         var $page [expr {$px + 3 * $cw}] [expr {$panel_y + 112}] \
             $temp_note_code -font $L(font_caption) -fill $C(ink_3)
+    }
+    # 0.43.1: the same caption slot under WEIGHT, for the espresso page's
+    # target ("of 38.0 g") -- the number you are pouring towards.
+    if { $weight_note_code ne "" } {
+        var $page [expr {$px + 2 * $cw}] [expr {$panel_y + 112}] \
+            $weight_note_code -font $L(font_caption) -fill $C(ink_3)
     }
 
     txt $page $L(center_x) $hint_y \
@@ -4356,7 +4528,8 @@ proc ::lumen::build_settings {} {
 # Each page gets ITS OWN timer. Sharing espresso_secs across all of them
 # reported time-since-the-last-espresso on the water and flush pages -- see
 # water_secs / flush_secs for why that showed as 0s.
-::lumen::build_flow_page espresso      {[::lumen::data::espresso_secs]} {[watertemp_text]} 1
+::lumen::build_flow_page espresso      {[::lumen::data::espresso_secs]} {[watertemp_text]} 1 \
+    "TEMP" "" {[::lumen::data::target_yield_note]}
 ::lumen::build_flow_page hotwaterrinse {[::lumen::data::flush_secs]}    {[watertemp_text]}
 ::lumen::build_flow_page water         {[::lumen::data::water_secs]}    {[watertemp_text]}
 # The steam column shows the STEAM HEATER sensor (the only steam-side sensor

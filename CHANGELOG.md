@@ -4,6 +4,25 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.43.1 - polish batch from the 2026-09-15 review
+
+Base: 0.43.0. **Safety status: unchanged. No new writes; the one new read is
+the shot file's top-level `clock`, latched with the rest of the record.**
+
+- Confidence band coloured by meaning: Good/Excellent green, Poor amber, Fair
+  and the estimate line neutral (three stacked items). Grind delta in ink_2.
+- LAST SHOT card gains "Today 15:05" / "Yesterday" / "Fri 12 Sep 12:40"
+  (file clock, espresso_clock in-session; honours the CLOCK row formats).
+- Chart legend shows each series' final value with its unit; pitch 110 -> 170.
+- LAST SHOT ratio one decimal, like NEXT SHOT. STEAM row's small line carries
+  its unit. Theme copy says the app closes (it never restarted itself).
+- Scale readout: "Connecting" becomes "Tap to retry" after 30 s of one attempt.
+- Taskbar water turns amber under 300 ml (second stacked item).
+- Espresso page: "of 38.0 g" under the live weight (blank with no target).
+- Tertiary ink lifted for contrast: dark #74829A -> #8290A8, light #7C8798 -> #65708A.
+- Stale header/layout comments fixed. Harness expectations updated (ratio, steam
+  unit, low-water split). No bake, no asset change.
+
 ## 0.43.0 - the chart shows the last REAL shot of the loaded bean - TABLET-VERIFIED 2026-09-15 (startup, bag cycler, and a live cleaning cycle: the core saved 20260915T220626 at 22:08:57.841, Lumen's listener reloaded the bean's 20.8 s real shot at .842, SDB indexed the cleaning run afterwards)
 
 Base: 0.42.0.

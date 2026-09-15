@@ -8,7 +8,15 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.43.0 — every page built, baked and running on the tablet.**
+**Version 0.43.1 — every page built, baked and running on the tablet.**
+
+New in 0.43.1 (polish): the confidence band is coloured by what it says
+(green for Good, amber for Poor), the LAST SHOT card says **when** the
+shot was pulled, the chart legend carries each curve's final value with
+its unit, the water readout turns amber under 300 ml, the scale box says
+"Tap to retry" instead of "Connecting" forever, the espresso page shows
+the target under the live weight, and the tertiary text is a step
+brighter for contrast.
 
 New in 0.43.0: the chart and the LAST SHOT card show the last **real**
 shot of the loaded bean. A cleaning run (or a backflush, calibration,
@@ -78,7 +86,7 @@ backdrop and let the shadow do the separating.
 
 | Tile | Shows | Tap |
 |---|---|---|
-| Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL (blank when no machine is connected) | The five icons: mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, DE1 side view = the stock app settings, moon = sleep |
+| Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL — amber under 300 ml, blank when no machine is connected | The five icons: mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, DE1 side view = the stock app settings, moon = sleep |
 | Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
 | Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count. A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, an Estimate chip, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
@@ -90,7 +98,7 @@ backdrop and let the shadow do the separating.
 | ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
 | − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap ±0.1; drumming rapidly (3+ taps a second) escalates to ±0.5 then ±1.0. Any measured pace stays at ±0.1 (0.28.1) |
-| Scale readout | Live weight, or `Connecting` / `Connect` / `no scale` | Forces a scale reconnect |
+| Scale readout | Live weight, or `Connecting` (then `Tap to retry` after 30 s) / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
 | Scan bag | — | Bean Scanner |
 
@@ -211,6 +219,9 @@ will sit off its panel.
 
 Dark and light are both defined. The mode is read once at load from
 `::settings(lumen_theme)` (`dark` or `light`); it defaults to dark.
+
+Switching the theme closes the app; reopen it from the launcher (it cannot
+restart itself, see below).
 
 The Lumen settings page carries the **machine column** on the left: Brew
 temperature (±0.5°C), Steam, Flush time (±1 s) and Hot Water, each with the
