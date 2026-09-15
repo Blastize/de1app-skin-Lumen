@@ -4,7 +4,7 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.43.0 - the chart shows the last REAL shot of the loaded bean - TABLET-VERIFIED 2026-09-15 (startup + bag cycler: the Pink Bourbon bag, whose newest file is a 140 s cleaning run, loads its 21.3 s real shot; in-session reload awaits the next cleaning cycle)
+## 0.43.0 - the chart shows the last REAL shot of the loaded bean - TABLET-VERIFIED 2026-09-15 (startup, bag cycler, and a live cleaning cycle: the core saved 20260915T220626 at 22:08:57.841, Lumen's listener reloaded the bean's 20.8 s real shot at .842, SDB indexed the cleaning run afterwards)
 
 Base: 0.42.0.
 
