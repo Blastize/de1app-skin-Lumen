@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.44.0  (the tank-empty page is a Lumen page; see `variable version`)
+#  Version: 0.45.0  (LOW WATER threshold row fills the settings' fourth slot; see `variable version`)
 #
 #
 #
@@ -37,6 +37,11 @@ package require de1plus 1.0
 #  lumen_chart_stages are no longer read or written.)
 #    lumen_bag_count                 -- how many recent bean bags the home
 #                                       strip's bag cycler offers (3..10)
+#    lumen_water_low_ml              -- the tank level under which the
+#                                       taskbar water reading turns amber
+#                                       (100..800 ml, step 50, default 300;
+#                                       0.45.0; a Lumen preference, never
+#                                       sent to the machine)
 #
 #  Next-shot steppers (home strip):
 #    grinder_dose_weight             -- "Set dose" from the scale reading,
@@ -93,7 +98,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.44.0"
+    variable version "0.45.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -1864,11 +1869,31 @@ proc ::lumen::data::_water_ml_num {} {
     return [expr {round($ml)}]
 }
 
-# 0.43.1: the readout warns. Under 300 ml (a couple of shots plus a flush)
-# the value moves from the blue item to an amber one -- two stacked
-# fixed-colour items, the maintenance-dot pattern. The number itself is
-# unchanged; only which item carries it.
-proc ::lumen::water_low_ml {} { return 300 }
+# 0.43.1: the readout warns. Under the threshold (default 300 ml, a couple
+# of shots plus a flush) the value moves from the blue item to an amber
+# one -- two stacked fixed-colour items, the maintenance-dot pattern. The
+# number itself is unchanged; only which item carries it.
+#
+# 0.45.0: the threshold is a preference (LOW WATER row on the settings
+# page), stored like the bag count and clamped the same way so a
+# hand-edited settings file can never push it outside 100..800.
+proc ::lumen::water_low_ml {} {
+    set v 300
+    catch {
+        if { [info exists ::settings(lumen_water_low_ml)] \
+          && $::settings(lumen_water_low_ml) ne "" } {
+            set v $::settings(lumen_water_low_ml)
+        }
+    }
+    if { ![string is integer -strict $v] } { set v 300 }
+    if { $v < 100 } { set v 100 }
+    if { $v > 800 } { set v 800 }
+    return $v
+}
+
+proc ::lumen::data::water_low_value {} {
+    return "[::lumen::water_low_ml] ml"
+}
 
 proc ::lumen::data::water_ml {} {
     set ml [_water_ml_num]
@@ -3184,6 +3209,19 @@ proc ::lumen::act::adjust_bag_count { delta } {
     }
 }
 
+# Low-water threshold (0.45.0). A Lumen preference like the bag count:
+# plain save_settings, never save_settings_to_de1. 50 ml per tap.
+proc ::lumen::act::adjust_water_low { delta } {
+    set new [expr {[::lumen::water_low_ml] + $delta}]
+    if { $new < 100 } { set new 100 } elseif { $new > 800 } { set new 800 }
+    if { [catch {
+        set ::settings(lumen_water_low_ml) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the low-water threshold: $err"
+    }
+}
+
 proc ::lumen::act::adjust_dose { delta } {
     set cur [::lumen::data::_s ::settings(grinder_dose_weight)]
     if { ![string is double -strict $cur] } { set cur 0 }
@@ -4484,16 +4522,16 @@ proc ::lumen::build_settings {} {
     #  Two columns:
     #
     #    left  170..630 : BREW / STEAM / FLUSH / HOT WATER  (machine)
-    #    right 670..1170: THEME / BAGS TO CYCLE / CLOCK
+    #    right 670..1170: THEME / BAGS TO CYCLE / CLOCK / LOW WATER
     #
     #  0.36.0 (owner request): the GRIND ADVISOR row is GONE -- tapping
     #  the grind card on the home page opens those settings now -- and
-    #  CLOCK moved up into its slot, so the right column is three rows
-    #  ending at 496 (0.41.0 briefly added a DECENT APP fourth row;
-    #  0.42.0 removed it for the taskbar's one-tap DE1 icon). The left
-    #  column is untouched -- it is the machine column, and all four of
-    #  its steppers stay together. Rows on the same 110/244/378/512 grid
-    #  as ever (left uses all four).
+    #  CLOCK moved up into its slot (0.41.0 briefly added a DECENT APP
+    #  fourth row; 0.42.0 removed it for the taskbar's one-tap DE1 icon).
+    #  0.45.0: the fourth slot holds LOW WATER, the taskbar's amber
+    #  threshold, so both columns are four rows on the 110/244/378/512
+    #  grid again. The left column is the machine column and all four
+    #  of its steppers stay together.
     ####################################################################
     set lx $L(set_col_l) ; set lw $L(set_col_l_w)
     set rx $L(set_col_r) ; set rw $L(set_col_r_w)
@@ -4606,9 +4644,33 @@ proc ::lumen::build_settings {} {
     tap $p $ck_time_x $ck_by $ck_time_w $ck_bh \
         {::lumen::act::toggle_time_format} "Time format"
 
-    # (0.41.0 put a DECENT APP row in the fourth slot; 0.42.0 removed it
-    # again -- the owner wants the app settings ONE tap away, so they
-    # live on the taskbar's drawn DE1 icon instead.)
+    # LOW WATER (0.45.0), fourth row: the level under which the taskbar's
+    # water reading turns amber. Same stepper geometry as BAGS TO CYCLE
+    # two rows up; 50 ml per tap. (0.41.0 put a DECENT APP row here;
+    # 0.42.0 removed it for the taskbar's one-tap DE1 icon.)
+    glass $p $rx $ry4 $rw $L(set_row_h)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry4 + 26}] [translate "LOW WATER"] \
+        -font $L(font_label) -fill $C(ink_3)
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$ry4 + 56}] \
+        [translate "Taskbar water turns amber below this level."] \
+        -font $L(font_caption) -fill $C(ink_2) -width 220
+    set gy4 [expr {$ry4 + ($L(set_row_h) - $sh) / 2}]
+    set gmid_y4 [expr {$gy4 + $sh / 2.0}]
+    foreach sx [list $gx [expr {$gx + $sw + $sg + $svw + $sg}]] \
+            glyph [list "-" "+"] \
+            scode [list {::lumen::act::adjust_water_low -50} \
+                        {::lumen::act::adjust_water_low 50}] \
+            lbl [list "Low water down" "Low water up"] {
+        glass $p $sx $gy4 $sw $sh -radius $L(radius_sm) -spec 0
+        txt $p [expr {$sx + $sw / 2.0}] \
+            [expr {$gmid_y4 + ($glyph eq "-" ? $L(step_minus_dy) : 0)}] $glyph \
+            -font $L(font_section) -fill $C(crema) \
+            -anchor center -justify center
+        tap $p $sx $gy4 $sw $sh $scode $lbl
+    }
+    var $p [expr {$gx + $sw + $sg + $svw / 2.0}] $gmid_y4 \
+        {[::lumen::data::water_low_value]} \
+        -font $L(font_data) -fill $C(ink) -anchor center -justify center
 
     set dw $L(set_done_w) ; set dh $L(set_done_h)
     set dx [expr {$L(center_x) - $dw / 2}]

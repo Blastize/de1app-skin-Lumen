@@ -8,7 +8,12 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.44.0 — every page built, baked and running on the tablet.**
+**Version 0.45.0 — every page built, baked and running on the tablet.**
+
+New in 0.45.0: a **LOW WATER** row on the Lumen settings page sets the
+tank level under which the taskbar's water reading turns amber (100 to
+800 ml in 50 ml steps, default 300). It fills the slot the DECENT APP row
+left empty, so both settings columns are four rows again.
 
 New in 0.44.0: the **tank-empty page** is a Lumen page. When the machine
 runs dry it used to drop into the default skin's cracked-earth photo; now
@@ -248,10 +253,14 @@ The selected setting is the large value between the pills; the other sits
 small beneath it, so both are always readable. The choice persists — whichever
 half you last steered is the one waiting next time.
 
-The right column runs **THEME**, **BAGS TO CYCLE** and **CLOCK**. The
-stock app settings (profiles, plugins, firmware) open from the taskbar's
-DE1 icon, and Grind Advisor's settings from the grind card itself — so
-neither needs a row here.
+The right column runs **THEME**, **BAGS TO CYCLE**, **CLOCK** and
+**LOW WATER**. The stock app settings (profiles, plugins, firmware) open
+from the taskbar's DE1 icon, and Grind Advisor's settings from the grind
+card itself — so neither needs a row here.
+
+*Low water* (100–800 ml, default 300) is the tank level under which the
+taskbar's water reading, and the out-of-water page's, turn amber. Stored
+in `::settings(lumen_water_low_ml)`; a Lumen preference only.
 
 *Bags to cycle* (3–10, default 5) sets how many recent bean bags the home
 strip's bag cycler offers. It is stored in `::settings(lumen_bag_count)` and
@@ -330,7 +339,8 @@ Every `::settings` write happens only on an explicit tap, and every stepper
 clamps its value. Three groups:
 
 * **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
-  depth), `lumen_time_format` / `lumen_date_format` (taskbar clock).
+  depth), `lumen_time_format` / `lumen_date_format` (taskbar clock),
+  `lumen_water_low_ml` (amber threshold, 100–800).
   Since 0.36.0 the chart is always smooth with stage lines shown —
   `live_graph_smoothing_technique` and `lumen_chart_stages` are no
   longer read or written.

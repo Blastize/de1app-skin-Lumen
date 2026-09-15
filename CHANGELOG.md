@@ -4,6 +4,27 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.45.0 - LOW WATER threshold row fills the settings page's fourth slot
+
+Base: 0.44.0. **Safety status: ONE new preference write, `lumen_water_low_ml`
+(100..800 ml, step 50, default 300), written only by the row's -/+ taps
+through `save_settings`, never sent to the machine. Nothing else changes.**
+
+- The right column's empty fourth slot (since 0.42.0 removed DECENT APP)
+  now holds LOW WATER: the level under which the taskbar's water reading
+  turns amber (0.43.1 hard-coded 300). Same stepper geometry as BAGS TO
+  CYCLE; both columns are four rows on the 110/244/378/512 grid again.
+- `::lumen::water_low_ml` reads and clamps the setting (junk -> 300);
+  `adjust_water_low` steps it; the taskbar's blue/amber split and the
+  tank-empty page's readout follow it on the next tick.
+- make_backgrounds.py: right column four panels + the row-4 stepper pills;
+  only the four `lumen_settings*.png` changed, palette samples unchanged.
+- Harness: LOW WATER in the row table; the row-4 stepper must call
+  adjust_water_low; default / step / clamp / junk cases and the taskbar
+  split at a custom threshold.
+
+Files: skin.tcl, tools/make_backgrounds.py, tools/check_skin.tcl, 4 settings PNGs, docs.
+
 ## 0.44.0 - the tank-empty page is a Lumen page - TABLET-VERIFIED 2026-09-15 (dark theme via DevBridge page load: panel, title, body, live "760 ml", Exit App / Ok pills in the stock zones; retry hint blank while idle, as the core intends; light theme checked as the baked image only)
 
 Base: 0.43.1. **Safety status: unchanged. No writes; the page's three tap
