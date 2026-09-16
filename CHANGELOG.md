@@ -4,6 +4,31 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.46.1 - the custom painter matches the bake; photo panels on the picker
+
+Base: 0.46.0. **Safety status: unchanged (same files, same prefs; the
+signature's painter number is 2, so existing custom PNGs are redrawn once).**
+
+- Owner report: artefacts on the custom pages. Cause: the shadow was clipped
+  to OUTSIDE the panel with a profile that jumped from full to half at the
+  shadow rect's offset edge -- a hard darker strip under every panel and
+  chalk-white interiors -- while the bake casts a Gaussian shadow UNDER the
+  translucent glass (that darkening is what makes its panels read grey).
+  `_fall` is now a continuous blurred-edge profile (1 inside, 0.5 on the
+  edge, 0 at 2 sigma); the shadow sits under the glass; S 18 / offset 6 for
+  panels and pills alike; the bake's own alphas (glass 14|150, raised
+  26|200, shadow 150|70, lift 11|70, accent wash 12|120, specular 80|120).
+- Tapered specular on rows 1-2 (0 at both ends), the top-lift wash over
+  85% of each non-flat panel, chart panels flat. Opaque tokens are now
+  "glass over shadowed ground": the model reproduces the sampled chart
+  tones (#131418 vs #151618 dark, #DDE0E5 vs #DEE0E4 light; harness-pinned).
+- `glass` on non-baked pages draws a photo panel from the same painter
+  (polygon only headless / on failure), so the picker rows are real glass.
+- Light accent floor 18 (a yellow accent must be allowed down to olive to
+  clear 3:1 on pale glass). Memo rows keyed by 8-bit alpha.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.46.0 - Custom theme: your own backdrop and accent, drawn on the tablet - TABLET-VERIFIED 2026-09-16 (picker opened from the THEME caption, Sea glass preset, Done, relaunch: the five backgrounds drew in 5.6 s, home + settings rendered in the custom palette, chart flush with its panel; cycled back to dark via THEME + Done)
 
 Base: 0.45.0. Tablet lesson: the first picker screenshot showed the preview's

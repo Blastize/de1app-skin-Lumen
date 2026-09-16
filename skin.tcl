@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.46.0  (Custom theme: your own backdrop and accent, drawn on the tablet; see `variable version`)
+#  Version: 0.46.1  (custom painter matches the bake: shadow under the glass, tapered specular, top lift; photo panels on the picker; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.46.0"
+    variable version "0.46.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -296,6 +296,24 @@ proc ::lumen::set_palette { mode } {
         # Sampled from 1340x800/lumen_flow_chart.png.
         set C(chart_bg_flow) "#171719"
 
+    }
+
+    # 0.46.1: the painter's parameters for THIS theme, so non-baked pages
+    # (the picker, any fallback page) get photo panels drawn by the same
+    # painter as the custom backgrounds. Dark and light map onto their
+    # presets; custom onto the saved colours.
+    variable theme_P
+    if { [catch {
+        switch -exact -- $mode {
+            light   { set theme_P [::lumen::custom::palette light 220 30 34 76] }
+            custom  { set pr [::lumen::custom::prefs]
+                      set theme_P [::lumen::custom::palette [dict get $pr base] [dict get $pr bh] \
+                                       [dict get $pr bs] [dict get $pr ah] [dict get $pr as]] }
+            default { set theme_P [::lumen::custom::palette dark 222 32 34 86] }
+        }
+    } err] } {
+        set theme_P ""
+        msg -NOTICE "Lumen: no painter parameters for theme '$mode': $err"
     }
 
     # The espresso chart reads these globals straight out of the skin.
@@ -870,10 +888,37 @@ proc ::lumen::glass { page x y w h args } {
     set tagargs {}
     if { $o(-tags) ne "" } { set tagargs [list -tags $o(-tags)] }
 
-    # NO drop shadow. Tried in 0.6.0 and reverted: on a near-black ground the
-    # shadow tones (#04060A -> #020407) span about two RGB values, so the
-    # "falloff" was a solid near-black ring around every panel -- a hard
-    # outline, not depth. A dark theme leaves a darker shadow nowhere to go.
+    # 0.46.1: where Tk can paint, the panel is a photo from the same
+    # painter that draws the custom backgrounds -- real translucency over
+    # the ground, a soft shadow, the tapered specular -- placed with its
+    # shadow margin around the requested rect. The vector polygon below is
+    # the headless / failure fallback.
+    variable theme_P
+    if { [info commands image] ne "" && [info exists theme_P] && $theme_P ne "" } {
+        if { ![catch {
+            lassign [::lumen::custom::screen] W H
+            if { $W <= 0 } { error "no screen size" }
+            set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
+            set kind plain
+            if { $o(-fill) eq $C(crema_lo) } { set kind accent } \
+            elseif { $o(-fill) eq $C(glass_2) } { set kind raised }
+            set S [expr {int(round(18 * $sy))}] ; set dy [expr {int(round(6 * $sy))}]
+            set png [::lumen::custom::panel_png $theme_P \
+                [expr {int(round($w * $sx))}] [expr {int(round($h * $sy))}] \
+                [expr {int(round($o(-radius) * $sy))}] $kind $S $dy]
+            set img [image create photo -data $png]
+            uplevel #0 [list dui add canvas_item image $page \
+                [X [expr {$x - $S / $sx}]] [Y [expr {$y - $S / $sy}]] \
+                -image $img -anchor nw {*}$tagargs]
+        } err] } {
+            return
+        }
+        msg -NOTICE "Lumen: photo panel failed on $page, drawing a polygon: $err"
+    }
+
+    # NO drop shadow on the vector path. Tried in 0.6.0 and reverted: on a
+    # near-black ground the shadow tones span about two RGB values, so the
+    # "falloff" was a solid near-black ring around every panel.
 
     rounded_rect $page $x1 $y1 $x2 $y2 [X $o(-radius)] \
         -fill $o(-fill) -outline $o(-outline) -width 2 {*}$tagargs
@@ -3898,13 +3943,16 @@ proc ::lumen::custom::prefs {} {
 proc ::lumen::custom::palette { base bh bs ah as } {
     set dark [expr {$base ne "light"}]
     set P [dict create base $base]
+    # Alphas are the bake's own (make_backgrounds.py THEMES, /255): glass
+    # 14 | 150, raised 26 | 200, border 34, specular 80 | 120, shadow
+    # 150 | 70, top lift 11 | 70, accent wash 12 | 120.
     if { $dark } {
         set top [hsl_rgb $bh $bs 12] ; set bot [hsl_rgb $bh [expr {min(70, $bs + 4)}] 3]
         set mid [mix $top $bot 0.5]
         set white {255 255 255}
-        set glass_a 0.055 ; set raised_a 0.10 ; set brd_a 0.13 ; set spec_a 0.22
+        set glass_a 0.055 ; set raised_a 0.10 ; set brd_a 0.13 ; set spec_a 0.31 ; set lift_a 0.043
         set brd_rgb $white ; set spec_rgb $white
-        set shadow_rgb {0 0 0} ; set shadow_a 0.60
+        set shadow_rgb {0 0 0} ; set shadow_a 0.59
         set ink   [hsl_rgb $bh 30 96]
         set ink2  [hsl_rgb $bh 20 75]
         set ink3_l 60 ; set ink3_step 4 ; set ink3_max 84
@@ -3918,68 +3966,80 @@ proc ::lumen::custom::palette { base bh bs ah as } {
         set top [hsl_rgb $bh [expr {min(70, $bs + 10)}] 97] ; set bot [hsl_rgb $bh $bs 87]
         set mid [mix $top $bot 0.5]
         set white {255 255 255}
-        set glass_a 0.60 ; set raised_a 0.85 ; set brd_a 0.14 ; set spec_a 0.70
+        set glass_a 0.59 ; set raised_a 0.78 ; set brd_a 0.13 ; set spec_a 0.47 ; set lift_a 0.27
         set brd_rgb [hsl_rgb $bh 40 13] ; set spec_rgb $white
-        set shadow_rgb [hsl_rgb $bh 40 16] ; set shadow_a 0.18
+        set shadow_rgb [hsl_rgb $bh 40 16] ; set shadow_a 0.27
         set ink   [hsl_rgb $bh 30 11]
         set ink2  [hsl_rgb $bh 16 35]
         set ink3_l 47 ; set ink3_step -4 ; set ink3_max 30
-        set acc_l 44 ; set acc_step -4 ; set acc_max 28
+        # Floor 18: a saturated yellow only clears 3:1 on pale glass as a
+        # dark olive, and the guard must be allowed to get there.
+        set acc_l 44 ; set acc_step -4 ; set acc_max 18
         set lo_rgb [hsl_rgb $ah $as 78] ; set lo_a 0.45
         set brdacc_rgb [hsl_rgb $ah [expr {$as * 0.8}] 55] ; set brdacc_a 0.60
         dict set P good "#12805F" ; dict set P warn "#B4761A" ; dict set P danger "#B23641"
         dict set P c_press "#0E9E7C" ; dict set P c_flow "#3F72E0"
         dict set P c_temp "#E04F5C" ; dict set P c_weight "#A8763F" ; dict set P grid "#D5DBE3"
     }
-    set glass [over $white $glass_a $mid]
-    set raised [over $white $raised_a $mid]
+    # Opaque tokens for canvas items are the panel as it really renders:
+    # the glass over the SHADOWED ground (the bake casts the shadow under
+    # the translucent panel). Check: this model gives #131518 for the dark
+    # preset and #DEE1E5 for the light one, against the sampled chart
+    # tones #151618 / #DEE0E4 of the baked images.
+    set shaded [over $shadow_rgb $shadow_a $mid]
+    set glass [over $white $glass_a $shaded]
+    set raised [over $white $raised_a $shaded]
 
     # Tertiary ink: step away from the glass until the label floor holds.
     set ink3 [hsl_rgb $bh 16 $ink3_l]
     set l $ink3_l
-    while { [contrast $ink3 $glass] < 4.5 && ($ink3_step > 0 ? $l < $ink3_max : $l > $ink3_max) } {
+    # Floors carry a small margin over 4.5 / 3.0 so the 8-bit hex the
+    # canvas gets still clears them after channel rounding.
+    while { [contrast $ink3 $glass] < 4.56 && ($ink3_step > 0 ? $l < $ink3_max : $l > $ink3_max) } {
         set l [expr {$l + $ink3_step}]
         set ink3 [hsl_rgb $bh 16 $l]
     }
     # Accent: the same, to 3:1 (large text and controls).
     set acc [hsl_rgb $ah $as $acc_l]
     set l $acc_l
-    while { [contrast $acc $glass] < 3.0 && ($acc_step > 0 ? $l < $acc_max : $l > $acc_max) } {
+    while { [contrast $acc $glass] < 3.06 && ($acc_step > 0 ? $l < $acc_max : $l > $acc_max) } {
         set l [expr {$l + $acc_step}]
         set acc [hsl_rgb $ah $as $l]
     }
+
+    # Accent panels and pills: the bake's crema_fil REPLACES the white glass
+    # -- a faint accent wash over the shadowed ground (12/255 on dark,
+    # (255,206,132) at 120/255 on light), never the full-strength accent.
+    if { $dark } {
+        set accfill_rgb $acc ; set accfill_a 0.06
+    } else {
+        set accfill_rgb [hsl_rgb $ah $as 76] ; set accfill_a 0.47
+    }
+    set accpanel [over $accfill_rgb $accfill_a $shaded]
 
     dict set P bg        [rgb_hex $mid]
     dict set P bg_top    [rgb_hex $top]
     dict set P bg_bot    [rgb_hex $bot]
     dict set P glass     [rgb_hex $glass]
     dict set P glass_2   [rgb_hex $raised]
-    dict set P glass_brd [rgb_hex [over $brd_rgb $brd_a $mid]]
-    dict set P spec      [rgb_hex [over $spec_rgb $spec_a $mid]]
+    dict set P glass_brd [rgb_hex [over $brd_rgb $brd_a $shaded]]
+    dict set P spec      [rgb_hex [over $spec_rgb $spec_a $shaded]]
     dict set P ink       [rgb_hex $ink]
     dict set P ink_2     [rgb_hex $ink2]
     dict set P ink_3     [rgb_hex $ink3]
     dict set P crema     [rgb_hex $acc]
-    dict set P crema_lo  [rgb_hex [over $lo_rgb $lo_a $glass]]
-    dict set P crema_brd [rgb_hex [over $brdacc_rgb $brdacc_a $glass]]
-    # The chart widgets are opaque: match the panel at its centre height,
-    # 414 of 800 on home and 345 of 800 on the espresso page.
-    dict set P chart_bg      [rgb_hex [over $white $glass_a [mix $top $bot [expr {414 / 800.0}]]]]
-    dict set P chart_bg_flow [rgb_hex [over $white $glass_a [mix $top $bot [expr {345 / 800.0}]]]]
-
-    # Accent panels and pills: the baked tiles are the glass plus a faint
-    # accent wash -- barely warm on dark, a pale tint on light -- never
-    # the full-strength accent.
-    if { $dark } {
-        set accfill_rgb [mix $white $acc 0.5] ; set accfill_a 0.10
-    } else {
-        set accfill_rgb [mix $white [hsl_rgb $ah $as 78] 0.6] ; set accfill_a 0.72
-    }
+    dict set P crema_lo  [rgb_hex $accpanel]
+    dict set P crema_brd [rgb_hex [over $brdacc_rgb $brdacc_a $accpanel]]
+    # The chart widgets are opaque: match the flat panel at its centre
+    # height, 414 of 800 on home and 345 of 800 on the espresso page.
+    dict set P chart_bg      [rgb_hex [over $white $glass_a [over $shadow_rgb $shadow_a [mix $top $bot [expr {414 / 800.0}]]]]]
+    dict set P chart_bg_flow [rgb_hex [over $white $glass_a [over $shadow_rgb $shadow_a [mix $top $bot [expr {345 / 800.0}]]]]]
 
     # Generator parameters (rgb lists / alphas), consumed by bake.
     dict set P gen [dict create top $top bot $bot white $white \
         glass_a $glass_a raised_a $raised_a brd_rgb $brd_rgb brd_a $brd_a \
-        spec_rgb $spec_rgb spec_a $spec_a shadow_rgb $shadow_rgb shadow_a $shadow_a \
+        spec_rgb $spec_rgb spec_a $spec_a lift_a $lift_a \
+        shadow_rgb $shadow_rgb shadow_a $shadow_a \
         acc $acc lo_rgb $lo_rgb lo_a $lo_a brdacc_rgb $brdacc_rgb brdacc_a $brdacc_a \
         accfill_rgb $accfill_rgb accfill_a $accfill_a \
         bloom_rgb $acc bloom_a [expr {$dark ? 0.16 : 0.28}]]
@@ -4001,37 +4061,25 @@ proc ::lumen::custom::png_encode { w h rows } {
     return "\x89PNG\r\n\x1a\n[_png_chunk IHDR $ihdr][_png_chunk IDAT [zlib compress $raw 6]][_png_chunk IEND {}]"
 }
 
-# Shadow falloff outside an edge. A blurred rectangle's shadow is at HALF
-# strength on the edge itself and fades to nothing over the blur radius,
-# so this is 0.5 at d = 0 decaying quadratically to 0 at S; inside it is
-# 1 (clipped away under the panel by _px anyway).
+# A Gaussian-blurred rectangle's edge profile, separable: 1 deep inside
+# the rectangle, 0.5 ON its edge, 0 beyond ~2 sigma outside. d is the
+# SIGNED distance to the edge (negative inside), S ~ 2 sigma. Continuous,
+# which is the whole point: 0.46.0 jumped from 1 to 0.5 at the shadow's
+# offset edge and every panel wore a hard darker strip underneath.
 proc ::lumen::custom::_fall { d S } {
-    if { $d <= 0.0 } { return 1.0 }
+    if { $d <= -$S } { return 1.0 }
     if { $d >= $S } { return 0.0 }
-    set t [expr {1.0 - $d / double($S)}]
-    return [expr {0.5 * $t * $t}]
+    set t [expr {($S - $d) / (2.0 * $S)}]
+    return [expr {$t * $t * (3.0 - 2.0 * $t)}]
 }
 
-# One RGBA pixel: the panel (coverage c from the rounded-rect distance d,
-# straight alpha fa / border / specular) composited over its shadow (alpha
-# sa). Returns a 4-byte binary string.
-proc ::lumen::custom::_px { c d cy fill fa brd ba spec spa shrgb sa } {
-    # The shadow lives OUTSIDE the panel only: under a translucent glass a
-    # shadow would darken the panel below its own backdrop, the opposite
-    # of the baked look where panels sit lighter than the ground.
-    set sa [expr {$sa * (1.0 - $c)}]
-    if { $c > 0.0 } {
-        if { $cy == 0 } {
-            set rgb $spec ; set a $spa
-        } elseif { $d > -1.0 } {
-            set rgb $brd ; set a $ba
-        } else {
-            set rgb $fill ; set a $fa
-        }
-        set ca [expr {$a * $c}]
-    } else {
-        set rgb {0 0 0} ; set ca 0.0
-    }
+# One RGBA pixel: the panel colour rgb at straight alpha a, with coverage
+# c from the rounded-rect distance, over its shadow (alpha sa). The shadow
+# lies UNDER the glass, as in the Python bake (shadow first, translucent
+# fill over it): that darkening is what makes the real panels read grey
+# instead of white, and the sampled chart tones confirm it.
+proc ::lumen::custom::_px { c rgb a shrgb sa } {
+    set ca [expr {$a * $c}]
     set oa [expr {$ca + $sa * (1.0 - $ca)}]
     if { $oa <= 0.0 } { return [binary format cccc 0 0 0 0] }
     set out {}
@@ -4043,12 +4091,13 @@ proc ::lumen::custom::_px { c d cy fill fa brd ba spec spa shrgb sa } {
 }
 
 # A rounded panel of w x h physical px with corner radius rr, painted as a
-# PNG (w + 2S) x (h + 2S) with the shadow margin S around it (shadow offset
-# dy down). kind: plain | raised | accent. Only the margins and the corner
-# bands are evaluated per pixel; the straight middle of every row is one
-# run, so a full-width panel costs tens of thousands of evaluations, not
-# hundreds of thousands.
-proc ::lumen::custom::panel_png { P w h rr kind S dy } {
+# PNG (w + 2S) x (h + 2S) with the shadow margin S around it (shadow rect
+# offset dy down, edge profile _fall). kind: plain | raised | accent; flat
+# skips the top-lift gradient (the chart panels, whose opaque graph must
+# match one tone). Per-pixel work is confined to the margins, the corner
+# bands, the two specular rows and the top-lift rows; identical rows are
+# painted once (memo by shadow factor and row alpha).
+proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} } {
     set G [dict get $P gen]
     set white [dict get $G white]
     set shrgb [dict get $G shadow_rgb] ; set sha [dict get $G shadow_a]
@@ -4060,43 +4109,55 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy } {
         default { set fill $white ; set fa [dict get $G glass_a]
                   set brd [dict get $G brd_rgb] ; set ba [dict get $G brd_a] }
     }
-    set spec [dict get $G spec_rgb] ; set spa [dict get $G spec_a]
+    set spa [dict get $G spec_a] ; set hi [dict get $G lift_a]
     if { $rr * 2 > $w } { set rr [expr {$w / 2}] }
     if { $rr * 2 > $h } { set rr [expr {$h / 2}] }
     set W [expr {$w + 2 * $S}] ; set H [expr {$h + 2 * $S}]
     set hw [expr {$w / 2.0}] ; set hh [expr {$h / 2.0}]
     set zone [expr {$S + $rr + 2}]           ;# per-pixel columns each side
+    if { 2 * $zone >= $W } { set zone [expr {$W / 2}] }
+    set span [expr {$flat ? 0 : int($h * 0.85)}]
     set rows {}
-    set memo ""                              ;# the straight band's row
+    array set memo {}
     for { set y 0 } { $y < $H } { incr y } {
         set cy [expr {$y - $S}]
         set py [expr {$cy + 0.5 - $hh}]
         set qy [expr {abs($py) - ($hh - $rr)}]
-        # shadow vertical factor: the shadow rect is the card shifted dy.
-        set sdy [expr {$cy < $dy ? $dy - $cy : ($cy >= $h + $dy ? $cy - ($h + $dy) + 1 : 0)}]
-        set fy [_fall $sdy $S]
-        set row ""
+        # Shadow: signed distance to the offset shadow rect, vertically.
+        set dys [expr {max($dy - ($cy + 0.5), ($cy + 0.5) - ($h + $dy))}]
+        set fy [_fall $dys $S]
         set inner_row [expr {$cy >= 0 && $cy < $h}]
-        # Every row between the corner bands with the shadow fully under
-        # it is identical: paint it once, reuse it.
-        set straight [expr {$inner_row && $cy > $rr && $cy < $h - $rr - 1 && $fy == 1.0}]
-        if { $straight && $memo ne "" } {
-            lappend rows $memo
+        # Top lift: a white wash fading down 85% of the panel (Python's
+        # glass_hi), folded into this row's fill alpha (white over fill).
+        set la 0.0
+        if { $inner_row && $cy < $span } {
+            set la [expr {$hi * pow(1.0 - double($cy) / $span, 1.15)}]
+        }
+        # Quantised to what a PNG byte can hold, so consecutive lift rows
+        # that round to the same alpha share one painted row.
+        set fa_row [expr {int(round(($fa + $la - $fa * $la) * 255.0)) / 255.0}]
+        set spec_row [expr {$cy == 1 || $cy == 2}]
+        set straight [expr {$inner_row && $cy > $rr && $cy < $h - $rr - 1}]
+        set key "[expr {int(round($fy * 255.0))}]|[expr {int(round($fa_row * 255.0))}]"
+        if { $straight && [info exists memo($key)] } {
+            lappend rows $memo($key)
             continue
         }
-        # The straight middle: constant across [zone, W - zone).
-        if { $inner_row && $cy > $rr && $cy < $h - $rr - 1 } {
+        set row ""
+        if { $straight } {
             set midc 1.0 ; set midd -2.0
         } elseif { $inner_row } {
-            # Rows inside the corner band but between the corners are fully
-            # covered horizontally; the distance there is purely vertical.
             set midc 1.0 ; set midd [expr {abs($py) - $hh}]
         } else {
             set midc 0.0 ; set midd 1.0
         }
-        set midpx [_px $midc $midd $cy $fill $fa $brd $ba $spec $spa $shrgb [expr {$sha * $fy}]]
+        if { $midd > -1.0 && $midc > 0.0 } {
+            set midpx [_px $midc $brd $ba $shrgb [expr {$sha * $fy}]]
+        } else {
+            set midpx [_px $midc $fill $fa_row $shrgb [expr {$sha * $fy}]]
+        }
         for { set x 0 } { $x < $W } { incr x } {
-            if { $x == $zone } {
+            if { $x == $zone && !$spec_row } {
                 append row [string repeat $midpx [expr {$W - 2 * $zone}]]
                 set x [expr {$W - $zone - 1}]
                 continue
@@ -4108,11 +4169,24 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy } {
             set d [expr {sqrt($mx * $mx + $my * $my) + min(max($qx, $qy), 0.0) - $rr}]
             set c [expr {0.5 - $d}]
             if { $c > 1.0 } { set c 1.0 } elseif { $c < 0.0 } { set c 0.0 }
-            set sdx [expr {$cx < 0 ? -$cx : ($cx >= $w ? $cx - $w + 1 : 0)}]
-            set sa [expr {$sha * $fy * [_fall $sdx $S]}]
-            append row [_px $c $d $cy $fill $fa $brd $ba $spec $spa $shrgb $sa]
+            set dxs [expr {max(-($cx + 0.5), ($cx + 0.5) - $w)}]
+            set sa [expr {$sha * $fy * [_fall $dxs $S]}]
+            if { $c > 0.0 && $d > -1.0 } {
+                append row [_px $c $brd $ba $shrgb $sa]
+            } elseif { $spec_row && $c > 0.0 && $cx >= $rr && $cx < $w - $rr } {
+                # The specular run: fades to nothing at both ends (a plain
+                # line "stopped dead and read as a seam" -- the bake's own
+                # note), full on row 1, half on row 2.
+                set t [expr {double($cx - $rr) / max(1, $w - 2 * $rr - 1)}]
+                set sp [expr {$spa * pow(1.0 - abs(2.0 * $t - 1.0), 0.8) * ($cy == 1 ? 1.0 : 0.5)}]
+                set a [expr {$fa_row + $sp - $fa_row * $sp}]
+                set rgb [mix $fill $white [expr {$a > 0 ? $sp / $a : 0.0}]]
+                append row [_px $c $rgb $a $shrgb $sa]
+            } else {
+                append row [_px $c $fill $fa_row $shrgb $sa]
+            }
         }
-        if { $straight } { set memo $row }
+        if { $straight } { set memo($key) $row }
         lappend rows $row
     }
     return [png_encode $W $H $rows]
@@ -4186,24 +4260,42 @@ proc ::lumen::custom::page_photo { P spec W H } {
         image delete $bl
     }
 
-    # Panels then inner pills, each with its own shadow margin.
-    foreach {group S dy} [list panels [expr {int(round(30 * $sy))}] [expr {int(round(10 * $sy))}] \
-                               inner  [expr {int(round(8 * $sy))}]  [expr {int(round(3 * $sy))}]] {
+    # Panels then inner pills. One shadow recipe for both, the bake's own:
+    # blur sigma 9 (S = 2 sigma = 18) offset 6 design px. The chart panels
+    # (the second panel of flow_chart, the third of home) are flat.
+    set S [expr {int(round(18 * $sy))}] ; set dy [expr {int(round(6 * $sy))}]
+    foreach group {panels inner} {
+        set i 0
         foreach item [dict get $spec $group] {
             lassign $item x y w h r kind
+            set flat [expr {$group eq "panels" && [dict get $spec out] in {lumen_home lumen_flow_chart} \
+                            && (([dict get $spec out] eq "lumen_home" && $i == 2) \
+                             || ([dict get $spec out] eq "lumen_flow_chart" && $i == 0))}]
             set pw [expr {int(round($w * $sx))}] ; set ph [expr {int(round($h * $sy))}]
-            set png [panel_png $P $pw $ph [expr {int(round($r * $sy))}] $kind $S $dy]
+            set png [panel_png $P $pw $ph [expr {int(round($r * $sy))}] $kind $S $dy $flat]
             set pi [image create photo -data $png]
             _paste $img $pi [expr {int(round($x * $sx)) - $S}] [expr {int(round($y * $sy)) - $S}] 1
             image delete $pi
+            incr i
         }
     }
     return $img
 }
 
-# Signature of what the custom files were drawn from.
+# The screen in physical px, from dui or Tk, or 0 0 when neither answers.
+proc ::lumen::custom::screen {} {
+    set W 0 ; set H 0
+    catch { set W [expr {int([dui cget screen_size_width])}] ; set H [expr {int([dui cget screen_size_height])}] }
+    if { $W <= 0 || $H <= 0 } { catch { set W [winfo screenwidth .] ; set H [winfo screenheight .] } }
+    if { $W <= 0 || $H <= 0 } { return {0 0} }
+    return [list $W $H]
+}
+
+# Signature of what the custom files were drawn from. The leading number
+# is the PAINTER version: bump it whenever the painter changes so files
+# drawn by an older one are redrawn (2 = 0.46.1's shadow-under-glass model).
 proc ::lumen::custom::signature { pr } {
-    return "1 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
+    return "2 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
 }
 
 # Makes sure lumen_*_custom.png exist for the screen and match the saved
@@ -4214,9 +4306,7 @@ proc ::lumen::custom::signature { pr } {
 proc ::lumen::custom::ensure_bake {} {
     variable pages
     if { [info commands image] eq "" } { return 0 }
-    set W 0 ; set H 0
-    catch { set W [expr {int([dui cget screen_size_width])}] ; set H [expr {int([dui cget screen_size_height])}] }
-    if { $W <= 0 || $H <= 0 } { catch { set W [winfo screenwidth .] ; set H [winfo screenheight .] } }
+    lassign [screen] W H
     if { $W <= 0 || $H <= 0 } { return 0 }
     set dir "[homedir]/skins/Lumen/${W}x${H}"
     set pr [prefs]
