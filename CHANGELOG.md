@@ -4,6 +4,35 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.47.0 - live retheme: a theme change applies in place, no quit-and-reopen - NOT YET TABLET-VERIFIED (harness PASSED; both palettes reverse-map cleanly; 211 role-tagged items)
+
+Base: 0.46.1. Custom theme pass 2 of 2. **Safety status: unchanged. No new
+writes; the same five prefs and `lumen_theme` are saved by the same taps,
+and the custom PNGs plus `lumen_custom.sig` are still the only files
+written -- now also when THEME or the picker's Done lands on Custom, not
+only at skin load. Nothing in history/, history_v2/ or any database.**
+
+- `::lumen::apply_theme mode`: (custom) `ensure_bake` first; `set_palette`;
+  `.can -bg`; every page background swaps its photo through
+  `dui::image::find` (a custom file is re-read in place, so a re-bake
+  shows) or refills its flat rect; one `itemconfigure` per role tag; the
+  photo panels are repainted from the new painter parameters; the graphs
+  restyled; `refresh_preview`. A failed custom apply changes nothing,
+  logs, restores the preference and says so in the THEME caption.
+- Role tags (`::lumen::_tags`): every item drawn by `txt`, `var`,
+  `rounded_rect`, `glass`, `chip`, `draw_de1_icon` leads with a unique
+  `lumen_i_N` tag and carries `lumen_c_<token>` / `lumen_o_<token>` from a
+  colour->token reverse map built in `set_palette`.
+- THEME applies on the tap; the picker's Done saves, shows "Drawing your
+  theme..." while the tablet paints, applies, returns to settings.
+  `pending_theme` and `restart_for_theme` are gone; Done is a page switch.
+- Not live (next launch): DYE's `DYE_Lumen` theme. GrindAdvisor's popup
+  reads `glass_material` when it opens, so it follows.
+- Harness: role-tag audit (unique first tags, no untagged token fills),
+  fake canvas / photo / graph, every apply path incl. failure and flat pages.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.46.1 - the custom painter matches the bake; photo panels on the picker - TABLET-VERIFIED 2026-09-16 (owner's Espresso preset redrawn at launch in 7.0 s: home, settings and the picker's photo panels all soft-shadowed, no strips, no seams; theme left as the owner set it)
 
 Base: 0.46.0. **Safety status: unchanged (same files, same prefs; the

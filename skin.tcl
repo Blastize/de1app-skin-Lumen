@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.46.1  (custom painter matches the bake: shadow under the glass, tapered specular, top lift; photo panels on the picker; see `variable version`)
+#  Version: 0.47.0  (live retheme: a theme change applies in place, no quit-and-reopen; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.46.1"
+    variable version "0.47.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -130,7 +130,25 @@ namespace eval ::lumen {
                                tankempty refill]
 
     variable theme_mode   "dark"
-    variable pending_theme ""   ;# set when a theme change needs a restart
+
+    # 0.47.0: live retheme. Every canvas item a Lumen helper draws carries
+    # ROLE tags naming the palette token its colours came from --
+    # lumen_c_<token> for -fill, lumen_o_<token> for -outline -- so a theme
+    # change is one itemconfigure per token, no restart. The tokens, in
+    # the order the reverse lookup tries them (first match wins should a
+    # derived custom palette ever give two tokens one value).
+    variable role_tokens [list ink ink_2 ink_3 crema crema_lo crema_brd \
+                               glass glass_2 glass_brd spec good warn danger \
+                               c_press c_flow c_temp c_weight grid \
+                               chart_bg chart_bg_flow bg]
+    variable C_rev        ;# colour -> token, rebuilt by set_palette
+    set C_rev [dict create]
+    variable item_n 0     ;# unique first tag per item (dui refuses duplicates)
+    variable photo_items  ;# tag -> {page x y w h radius kind}: photo panels to redraw
+    set photo_items [dict create]
+    variable charts [list]   ;# {widget token} per graph widget, restyled on retheme
+    variable bg_owned [list] ;# background photos Lumen created for a live swap
+    variable theme_status "" ;# one-line note under THEME after a failed apply
 
     # The profile the LAST shot ran on. Latched when the espresso page opens
     # (a shot is starting, so the loaded profile is the one it will use) and
@@ -314,6 +332,15 @@ proc ::lumen::set_palette { mode } {
     } err] } {
         set theme_P ""
         msg -NOTICE "Lumen: no painter parameters for theme '$mode': $err"
+    }
+
+    # 0.47.0: colour -> token, for the role tags the drawing helpers attach.
+    variable C_rev
+    variable role_tokens
+    set C_rev [dict create]
+    foreach tok $role_tokens {
+        set v [string toupper $C($tok)]
+        if { ![dict exists $C_rev $v] } { dict set C_rev $v $tok }
     }
 
     # The espresso chart reads these globals straight out of the skin.
@@ -845,6 +872,26 @@ proc ::lumen::_font_family_ok { key } {
 # Reproducing the mockup's depth honestly needs real translucency, i.e. baked
 # PNG panels, which is the tooling route rejected at the start of the project.
 
+# 0.47.0: the tag list for one item -- a unique first tag (dui refuses a
+# second item whose FIRST tag already exists on the page, so no role tag
+# may ever lead), the caller's own tags, then the role tags: lumen_c_<tok>
+# when -fill is a palette token, lumen_o_<tok> when -outline is one.
+# ::lumen::apply_theme recolours by these. Colours that are not tokens
+# (the picker's hue swatches, "" fills) get no role tag and keep their
+# colour across themes, which is what they mean.
+proc ::lumen::_tags { fill outline {own ""} } {
+    variable C_rev
+    variable item_n
+    set tags [list lumen_i_[incr item_n] {*}$own]
+    if { $fill ne "" && [dict exists $C_rev [string toupper $fill]] } {
+        lappend tags lumen_c_[dict get $C_rev [string toupper $fill]]
+    }
+    if { $outline ne "" && [dict exists $C_rev [string toupper $outline]] } {
+        lappend tags lumen_o_[dict get $C_rev [string toupper $outline]]
+    }
+    return $tags
+}
+
 proc ::lumen::rounded_rect { page x1 y1 x2 y2 radius args } {
     set r $radius
     if { $r * 2 > ($x2 - $x1) } { set r [expr {($x2 - $x1) / 2}] }
@@ -862,7 +909,12 @@ proc ::lumen::rounded_rect { page x1 y1 x2 y2 radius args } {
         $x1 [expr {$y2 - $r}] \
         $x1 [expr {$y1 + $r}] \
         $x1 $y1]
-    return [uplevel #0 [list dui add canvas_item polygon $page {*}$pts -smooth 1 {*}$args]]
+    array set o [list -fill "" -outline "" -tags ""]
+    array set o $args
+    set rest {}
+    foreach {k v} $args { if { $k ne "-tags" } { lappend rest $k $v } }
+    return [uplevel #0 [list dui add canvas_item polygon $page {*}$pts -smooth 1 {*}$rest \
+        -tags [_tags $o(-fill) $o(-outline) $o(-tags)]]]
 }
 
 # All arguments in DESIGN px.
@@ -894,22 +946,20 @@ proc ::lumen::glass { page x y w h args } {
     # shadow margin around the requested rect. The vector polygon below is
     # the headless / failure fallback.
     variable theme_P
+    variable photo_items
     if { [info commands image] ne "" && [info exists theme_P] && $theme_P ne "" } {
         if { ![catch {
-            lassign [::lumen::custom::screen] W H
-            if { $W <= 0 } { error "no screen size" }
-            set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
             set kind plain
             if { $o(-fill) eq $C(crema_lo) } { set kind accent } \
             elseif { $o(-fill) eq $C(glass_2) } { set kind raised }
-            set S [expr {int(round(18 * $sy))}] ; set dy [expr {int(round(6 * $sy))}]
-            set png [::lumen::custom::panel_png $theme_P \
-                [expr {int(round($w * $sx))}] [expr {int(round($h * $sy))}] \
-                [expr {int(round($o(-radius) * $sy))}] $kind $S $dy]
-            set img [image create photo -data $png]
-            uplevel #0 [list dui add canvas_item image $page \
-                [X [expr {$x - $S / $sx}]] [Y [expr {$y - $S / $sy}]] \
-                -image $img -anchor nw {*}$tagargs]
+            set spec [list page $page x $x y $y w $w h $h radius $o(-radius) kind $kind]
+            lassign [_panel_photo $spec] img px py
+            # 0.47.0: the item is tagged so apply_theme can hand it a panel
+            # painted from the next theme's parameters (see photo_items).
+            set tags [_tags "" "" $o(-tags)]
+            uplevel #0 [list dui add canvas_item image $page $px $py \
+                -image $img -anchor nw -tags [concat $tags lumen_photo]]
+            dict set photo_items [lindex $tags 0] $spec
         } err] } {
             return
         }
@@ -929,8 +979,26 @@ proc ::lumen::glass { page x y w h args } {
         set sx2 [X [expr {$x + $w - $o(-radius) * 0.6}]]
         set sy  [expr {$y1 + 2}]
         uplevel #0 [list dui add canvas_item line $page $sx1 $sy $sx2 $sy \
-            -fill $C(spec) -width 2]
+            -fill $C(spec) -width 2 -tags [_tags $C(spec) ""]]
     }
+}
+
+# Paints one photo panel from the CURRENT theme's painter parameters.
+# `spec` is the dict glass records (design px); returns the photo name
+# and the virtual x y of its top-left corner (the panel sits inside its
+# shadow margin S). Throws when Tk or the screen size is missing.
+proc ::lumen::_panel_photo { spec } {
+    variable theme_P
+    if { ![info exists theme_P] || $theme_P eq "" } { error "no painter parameters" }
+    lassign [::lumen::custom::screen] W H
+    if { $W <= 0 } { error "no screen size" }
+    set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
+    set S [expr {int(round(18 * $sy))}] ; set dy [expr {int(round(6 * $sy))}]
+    set png [::lumen::custom::panel_png $theme_P \
+        [expr {int(round([dict get $spec w] * $sx))}] [expr {int(round([dict get $spec h] * $sy))}] \
+        [expr {int(round([dict get $spec radius] * $sy))}] [dict get $spec kind] $S $dy]
+    set img [image create photo -data $png]
+    return [list $img [X [expr {[dict get $spec x] - $S / $sx}]] [Y [expr {[dict get $spec y] - $S / $sy}]]]
 }
 
 # Small pill used for status chips.
@@ -948,7 +1016,7 @@ proc ::lumen::chip { page x y text args } {
     glass $page $x $y $w $h -radius 13 -fill $o(-bg) -outline $o(-outline) -spec 0
     dui add dtext $page [X [expr {$x + $w / 2.0}]] [Y [expr {$y + $h / 2.0}]] \
         -text $text -font $L(font_label) -fill $o(-fill) \
-        -anchor center -justify center
+        -anchor center -justify center -tags [_tags $o(-fill) ""]
 }
 
 # 0.42.0: the Decent app taskbar icon -- a SIDE VIEW of the DE1, drawn
@@ -979,7 +1047,7 @@ proc ::lumen::draw_de1_icon { page cx cy size color } {
         [Y [expr {$cy + (0.22 - 0.495) * $size}]] \
         [X [expr {$cx + (0.64 - 0.59) * $size}]] \
         [Y [expr {$cy + (0.02 - 0.495) * $size}]] \
-        -fill $color -width 4 -capstyle round]
+        -fill $color -width 4 -capstyle round -tags [_tags $color ""]]
 }
 
 #############################################################################
@@ -1836,26 +1904,20 @@ proc ::lumen::data::water_temp_note {} {
     return $out
 }
 
-# Shows what the theme WILL be, so the button reads as a toggle rather than
-# a label that never changes.
+# The theme that is on screen right now. 0.47.0: a tap applies live, so
+# there is no pending state to show any more.
 proc ::lumen::data::theme_label {} {
     set m $::lumen::theme_mode
-    if { $::lumen::pending_theme ne "" } { set m $::lumen::pending_theme }
     if { $m eq "dark" } { return [translate "Dark"] }
     if { $m eq "custom" } { return [translate "Custom"] }
     return [translate "Light"]
 }
 
-# 0.43.1 copy: the app CLOSES and cannot reopen itself (Android 16, see
-# restart_for_theme); "restarts" promised something it never did.
 # 0.46.0: the caption is also the tap that opens the colour picker.
+# 0.47.0: after a failed custom apply it carries the reason instead.
 proc ::lumen::data::theme_note {} {
-    if { $::lumen::pending_theme eq "" \
-      || $::lumen::pending_theme eq $::lumen::theme_mode } {
-        return [translate "Dark, Light or Custom. Tap here to pick your colours."]
-    }
-    set m [theme_label]
-    return "$m [translate {selected. Tap Done: the app closes, reopen it.}]"
+    if { $::lumen::theme_status ne "" } { return $::lumen::theme_status }
+    return [translate "Dark, Light or Custom. Tap here to pick your colours."]
 }
 
 proc ::lumen::data::version_line {} {
@@ -2935,30 +2997,43 @@ proc ::lumen::act::dye_next {} {
 # through the settings page would have done, so the plugin's own navigation
 # then works unmodified. Guarded and logged: if BeanScanner ever renames it,
 # this must fail loudly rather than trap the user again.
-# Theme is read once at load and every page is built from it, so switching
-# needs the app restarted. The tap only records the choice; Done performs the
-# restart (::lumen::act::restart_for_theme).
+# THEME button: cycles Dark -> Light -> Custom -> Dark (0.46.0) and, since
+# 0.47.0, applies the new theme on the spot -- the page you are on redraws
+# in it. Custom uses the colours last saved by the picker (Lumen-dark
+# defaults if none); the first time a set of colours is chosen its five
+# backgrounds are drawn on the tablet (a few seconds), after that the
+# files are reused. A failed apply keeps the current theme and says so in
+# the row's caption.
 proc ::lumen::act::toggle_theme {} {
-    # Toggle from the PENDING value once one exists. Basing this on
-    # theme_mode alone was a bug: that is fixed at load, so every tap
-    # produced the same result and you could never switch back.
     set cur $::lumen::theme_mode
-    if { $::lumen::pending_theme ne "" } { set cur $::lumen::pending_theme }
-    # 0.46.0: three-way cycle Dark -> Light -> Custom -> Dark. Custom uses
-    # the colours last saved by the picker (Lumen-dark defaults if none).
     switch -exact -- $cur {
         dark    { set new light }
         light   { set new custom }
         default { set new dark }
     }
+    ::lumen::act::_switch_theme $new
+}
+
+# Persists lumen_theme and applies it live; on failure the preference is
+# put back so the next launch matches what is on screen. Returns 1 when
+# the new theme is on screen.
+proc ::lumen::act::_switch_theme { new } {
+    set old $::lumen::theme_mode
     if { [catch {
         set ::settings(lumen_theme) $new
         save_settings
     } err] } {
         msg -ERROR "Lumen: could not save the theme preference: $err"
-        return
+        return 0
     }
-    set ::lumen::pending_theme $new
+    if { [::lumen::apply_theme $new] } { return 1 }
+    if { [catch {
+        set ::settings(lumen_theme) $old
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not restore the theme preference: $err"
+    }
+    return 0
 }
 
 proc ::lumen::act::open_settings {} {
@@ -2990,46 +3065,15 @@ proc ::lumen::act::toggle_date_format {} {
     }
 }
 
+# 0.47.0: Done is a plain page switch again. Until 0.46.1 a changed theme
+# made it quit the app (the palette was read once at load and every item
+# was created from it; the app cannot relaunch itself on Android 16, so
+# the owner reopened it by hand). ::lumen::apply_theme now recolours in
+# place, so nothing is pending when Done is tapped.
 proc ::lumen::act::close_settings {} {
-    if { $::lumen::pending_theme ne "" \
-      && $::lumen::pending_theme ne $::lumen::theme_mode } {
-        ::lumen::act::restart_for_theme
-        return
-    }
     if { [catch { dui page load off } err] } {
         msg -ERROR "Lumen: could not return to the home page: $err"
     }
-}
-
-# The palette is read once at load and every canvas item is created from it,
-# so a theme change only lands when the skin is sourced again. Apply it the
-# same way the app applies a skin change on leaving its own settings section
-# (skins/default/de1_skin_settings.tcl:65-71): show the stock message page,
-# then app_exit.
-#
-# The app does NOT come back by itself, and cannot: measured on Android 16
-# (SDK 36), `exec am start` from the app's own uid dies with
-# "package=com.android.shell does not belong to uid=..." before Android's
-# background-activity-start rules even apply, and `borg activity` would start
-# the activity in the process that is about to exit. A relaunch needs
-# something outside the app. Changing skin in the stock settings behaves the
-# same way, for the same reason.
-proc ::lumen::act::restart_for_theme {} {
-    msg -NOTICE "Lumen: theme set to $::lumen::pending_theme, restarting the app to apply it"
-    if { [catch {
-        save_settings
-        .can itemconfigure $::message_label \
-            -text [translate "Please quit and restart this app to apply your changes."]
-        .can itemconfigure $::message_button_label -text [translate "Wait"]
-        set_next_page off message
-        page_show message
-    } err] } {
-        # Never swallow this: if the message page failed we still exit below,
-        # and the log is the only place that would say why the screen looked
-        # wrong on the way out.
-        msg -ERROR "Lumen: could not show the restart message page: $err"
-    }
-    after 200 app_exit
 }
 
 proc ::lumen::act::open_app_settings {} {
@@ -3568,7 +3612,7 @@ proc ::lumen::act::scan_bag {} {
 proc ::lumen::txt { page x y text args } {
     variable C
     variable L
-    array set o [list -font $L(font_body) -fill $C(ink) -anchor nw -justify left -width 0]
+    array set o [list -font $L(font_body) -fill $C(ink) -anchor nw -justify left -width 0 -tags ""]
     array set o $args
 
     set extra {}
@@ -3576,7 +3620,7 @@ proc ::lumen::txt { page x y text args } {
 
     uplevel #0 [list dui add dtext $page [X $x] [Y $y] -text $text \
         -font $o(-font) -fill $o(-fill) -anchor $o(-anchor) \
-        -justify $o(-justify) {*}$extra]
+        -justify $o(-justify) -tags [_tags $o(-fill) "" $o(-tags)] {*}$extra]
 }
 
 # Like txt, but the text is a Tcl snippet re-evaluated on the app's update
@@ -3594,7 +3638,7 @@ proc ::lumen::var { page x y code args } {
 
     uplevel #0 [list dui add variable $page [X $x] [Y $y] -textvariable $code \
         -font $o(-font) -fill $o(-fill) -anchor $o(-anchor) \
-        -justify $o(-justify) {*}$extra]
+        -justify $o(-justify) -tags [_tags $o(-fill) ""] {*}$extra]
 }
 
 # Invisible tap target. Coordinates in DESIGN px.
@@ -3793,8 +3837,8 @@ proc ::lumen::tap { page x y w h command label {style zone} } {
 #  Preferences (all Lumen, never sent to the machine), written only by the
 #  picker page's Done: lumen_custom_base dark|light, lumen_custom_bh 0..360,
 #  lumen_custom_bs 0..70, lumen_custom_ah 0..360, lumen_custom_as 20..100,
-#  and lumen_theme = custom. Applying still uses the quit-and-reopen the
-#  other themes use; a live retheme is a later pass.
+#  and lumen_theme = custom. 0.47.0: applying is live (::lumen::apply_theme),
+#  for this theme and the two baked ones alike.
 #############################################################################
 
 namespace eval ::lumen::custom {
@@ -4344,6 +4388,196 @@ proc ::lumen::custom::ensure_bake {} {
 }
 
 #############################################################################
+#  Live retheme (0.47.0)
+#
+#  Until 0.46.1 the palette was read once at load and every canvas item was
+#  created from it, so a theme change meant quitting the app (which cannot
+#  relaunch itself on Android 16). Now a theme is applied in place:
+#
+#    1. custom only: ::lumen::custom::ensure_bake draws the five page
+#       backgrounds for the saved colours if they are not on disk yet;
+#    2. ::lumen::set_palette loads the new C() tokens;
+#    3. every page background swaps its photo (the theme's baked PNG,
+#       loaded through dui's own resolver) or, on flat pages, its fill;
+#    4. every role-tagged item (see ::lumen::_tags) is reconfigured, one
+#       itemconfigure per token;
+#    5. the photo panels on non-baked pages are repainted from the new
+#       painter parameters, the graph widgets restyled, the picker's
+#       selection rings refreshed.
+#
+#  Not covered, by design: DYE's editor pages take their colours from the
+#  DYE_Lumen dui theme registered once at plugin init (they follow on the
+#  next launch), and the GrindAdvisor glass popup reads glass_material
+#  when it opens, so it follows by itself.
+#############################################################################
+
+# Applies `mode` (dark | light | custom) live. Returns 1 when the theme is
+# on screen, 0 when it could not be (the current theme stays, the reason
+# is in the log and in theme_status for the THEME row's caption).
+proc ::lumen::apply_theme { mode } {
+    variable C
+    variable theme_mode
+    variable theme_status
+    variable role_tokens
+    variable _flat_pages
+
+    set t0 [clock milliseconds]
+    set old $theme_mode
+    set theme_status ""
+    if { $mode ni {dark light custom} } {
+        msg -ERROR "Lumen: unknown theme '$mode' not applied"
+        return 0
+    }
+
+    # Custom on photo pages needs its backgrounds before anything changes.
+    # (Pages declared flat at load carry drawn panels and a plain fill, so
+    # they retint without files.)
+    if { $mode eq "custom" && !$_flat_pages } {
+        set baked 0
+        if { [catch { set baked [::lumen::custom::ensure_bake] } err] } {
+            msg -ERROR "Lumen: custom theme bake threw: $err"
+            set baked 0
+        }
+        if { !$baked } {
+            msg -ERROR "Lumen: custom theme not applied: its backgrounds could not be drawn"
+            set theme_status [translate "Custom not applied: its backgrounds could not be drawn. See the log."]
+            return 0
+        }
+    }
+
+    set_palette $mode
+    set theme_mode $mode
+    switch -exact -- $mode {
+        light   { set ::lumen::_bg_suffix "_light" }
+        custom  { set ::lumen::_bg_suffix "_custom" }
+        default { set ::lumen::_bg_suffix "" }
+    }
+
+    set problems 0
+    if { [catch { set can [dui canvas] ; $can configure -bg $C(bg) } err] } {
+        msg -ERROR "Lumen: could not recolour the canvas ground: $err" ; incr problems
+    }
+    if { [catch { _swap_backgrounds } err] } {
+        msg -ERROR "Lumen: could not swap the page backgrounds: $err" ; incr problems
+    }
+    foreach tok $role_tokens {
+        if { [catch {
+            $can itemconfigure lumen_c_$tok -fill $C($tok)
+            $can itemconfigure lumen_o_$tok -outline $C($tok)
+        } err] } {
+            msg -ERROR "Lumen: could not recolour the $tok items: $err" ; incr problems
+        }
+    }
+    if { [catch { _redraw_photo_panels } err] } {
+        msg -ERROR "Lumen: could not repaint the photo panels: $err" ; incr problems
+    }
+    if { [catch { _retheme_charts } err] } {
+        msg -ERROR "Lumen: could not restyle the charts: $err" ; incr problems
+    }
+    # The picker's selection rings and base pills read C() -- refresh_preview
+    # logs its own failures.
+    refresh_preview
+
+    msg -INFO "Lumen: theme $old -> $mode applied live in [expr {[clock milliseconds] - $t0}] ms ($problems problems)"
+    return 1
+}
+
+# The photo for one background file of the current theme, through dui's
+# own resolver (screen-size folder, 2560x1600 rescale fallback). Reuses
+# the image dui loaded at page add when it has one; otherwise Lumen owns
+# it. A custom file is re-read from disk on every swap, because the same
+# filename holds different pixels after a re-bake.
+proc ::lumen::_bg_photo { file } {
+    variable bg_owned
+    set path [dui::image::find $file 1]
+    if { $path eq "" } { error "background '$file' not found" }
+    set custom [string match "*_custom.png" $file]
+    if { [dui::image::is_loaded $path] } {
+        set img [dui::image::get $path]
+        if { $custom } { $img read $path -shrink }
+        return $img
+    }
+    if { [dict exists $bg_owned $path] } {
+        set img [dict get $bg_owned $path]
+        if { $custom } { $img read $path -shrink }
+        return $img
+    }
+    set img [image create photo -file $path]
+    dict set bg_owned $path $img
+    return $img
+}
+
+# Every Lumen page background: photo items take the theme's file, flat
+# ones (the picker; every page when custom loaded without backgrounds)
+# take the page colour. Photos Lumen loaded for a theme no longer on any
+# page are freed, so at most one spare set stays in memory.
+proc ::lumen::_swap_backgrounds {} {
+    variable C
+    variable bg_owned
+    set can [dui canvas]
+    set in_use [list]
+    foreach {page file} [list off lumen_home lumen_settings lumen_settings \
+                              espresso lumen_flow_chart steam lumen_flow \
+                              water lumen_flow hotwaterrinse lumen_flow \
+                              tankempty lumen_message refill lumen_message \
+                              lumen_theme ""] {
+        foreach id [$can find withtag "pages&&$page"] {
+            if { [$can type $id] eq "image" } {
+                if { $file eq "" } { continue }
+                set img [_bg_photo "$file$::lumen::_bg_suffix.png"]
+                $can itemconfigure $id -image $img
+                lappend in_use $img
+            } else {
+                $can itemconfigure $id -fill $C(bg)
+            }
+        }
+    }
+    dict for {path img} $bg_owned {
+        if { $img ni $in_use } {
+            image delete $img
+            dict unset bg_owned $path
+        }
+    }
+}
+
+# Photo panels on non-baked pages: paint each again from the new theme's
+# painter parameters, hand the item the new photo, free the old one.
+proc ::lumen::_redraw_photo_panels {} {
+    variable photo_items
+    set can [dui canvas]
+    dict for {tag spec} $photo_items {
+        set ids [$can find withtag $tag]
+        if { $ids eq "" } { continue }
+        set old [$can itemcget [lindex $ids 0] -image]
+        lassign [_panel_photo $spec] img px py
+        $can itemconfigure $tag -image $img
+        if { $old ne "" && $old ne $img } { image delete $old }
+    }
+}
+
+# The graph widgets: opaque Tk widgets, so their backgrounds are the
+# sampled panel tones, and their series carry the theme's chart colours.
+proc ::lumen::_retheme_charts {} {
+    variable C
+    variable charts
+    foreach {w tok} $charts {
+        if { [catch {
+            $w configure -background $C($tok) -plotbackground $C($tok)
+            set have [$w element names]
+            foreach {el ctok} {l_pressure c_press l_flow c_flow l_weight c_weight \
+                               l_temp c_temp l_stages ink_3} {
+                if { $el in $have } { $w element configure $el -color $C($ctok) }
+            }
+            $w axis configure x -color $C(ink_3)
+            $w axis configure y -color $C(ink_3)
+            gridconfigure $w
+        } err] } {
+            msg -ERROR "Lumen: could not restyle chart $w: $err"
+        }
+    }
+}
+
+#############################################################################
 #  Boot
 #############################################################################
 
@@ -4375,6 +4609,9 @@ if { $::lumen::theme_mode eq "custom" } {
         set ::lumen::baked_pages [list]
     }
 }
+# 0.47.0: fixed for the session -- flat pages carry drawn panels over a
+# plain fill and retint without files; photo pages swap their PNG.
+set ::lumen::_flat_pages [expr {$::lumen::theme_mode eq "custom" && !$::lumen::_custom_baked}]
 
 # Every page uses a pre-rendered background. Tk canvas has no alpha and no
 # blur, so the frosted panels, their blurred backdrops, the soft shadows and
@@ -4708,12 +4945,14 @@ proc ::lumen::build_home {} {
     set cgh [expr {$L(chart_h) - 52 - $L(md)}]
 
     if { [catch {
-        dui add graph $p [X $cgx] [Y $cgy] \
+        set gw [dui add graph $p [X $cgx] [Y $cgy] \
             -width [X $cgw] -height [Y $cgh] \
             -background $C(chart_bg) -plotbackground $C(chart_bg) \
             -borderwidth 0 -plotrelief flat -relief flat \
             -plotpadx 18 -plotpady 8 \
-            -tclcode {::lumen::chart_setup %W}
+            -tclcode {::lumen::chart_setup %W}]
+        # 0.47.0: remembered so a live retheme can restyle it.
+        if { $gw ne "" } { lappend ::lumen::charts $gw chart_bg }
     } err] } {
         msg -ERROR "Lumen: could not create the shot chart: $err"
     }
@@ -4954,12 +5193,13 @@ proc ::lumen::build_flow_page { page timer_code temp_code {with_chart 0} {temp_l
         set gw [expr {$L(fc_chart_w) - 2 * $L(pad_x)}]
         set gh [expr {$L(fc_chart_h) - 2 * $L(md)}]
         if { [catch {
-            dui add graph $page [X $gx] [Y $gy] \
+            set gwidget [dui add graph $page [X $gx] [Y $gy] \
                 -width [X $gw] -height [Y $gh] \
                 -background $C(chart_bg_flow) -plotbackground $C(chart_bg_flow) \
                 -borderwidth 0 -plotrelief flat -relief flat \
                 -plotpadx 18 -plotpady 8 \
-                -tclcode {::lumen::chart_setup %W}
+                -tclcode {::lumen::chart_setup %W}]
+            if { $gwidget ne "" } { lappend ::lumen::charts $gwidget chart_bg_flow }
         } err] } {
             msg -ERROR "Lumen: could not create the live chart on $page: $err"
         }
@@ -5106,16 +5346,19 @@ proc ::lumen::act::theme_cancel {} {
     }
 }
 
-# Done: persist the five preferences plus lumen_theme=custom, then apply
-# the way every theme change applies -- the app closes and is reopened.
-# Nothing to apply (already custom with the same colours) just goes back.
+# Done: persist the five preferences, then (0.47.0) apply the custom theme
+# LIVE: the backgrounds are drawn if these colours have none yet, every
+# page is recoloured in place, and the picker goes back to the settings
+# page -- already in the new colours. Nothing to apply (already custom
+# with the same colours) just goes back. The status line under the
+# preview says what is happening while the tablet paints (a few seconds
+# during which nothing else moves), and names the failure if it fails.
 proc ::lumen::act::theme_apply {} {
     variable ::lumen::custom::pend
     set before [::lumen::custom::signature [::lumen::custom::prefs]]
     if { [catch {
         set ::settings(lumen_custom_base) $pend(base)
         foreach k {bh bs ah as} { set ::settings(lumen_custom_$k) $pend($k) }
-        set ::settings(lumen_theme) custom
         save_settings
     } err] } {
         msg -ERROR "Lumen: could not save the custom theme: $err"
@@ -5126,8 +5369,25 @@ proc ::lumen::act::theme_apply {} {
         theme_cancel
         return
     }
-    set ::lumen::pending_theme custom
-    ::lumen::act::restart_for_theme
+    ::lumen::theme_page_status [translate "Drawing your theme..."]
+    if { ![::lumen::act::_switch_theme custom] } {
+        ::lumen::theme_page_status [translate "Could not draw this theme. See the log."]
+        return
+    }
+    ::lumen::theme_page_status ""
+    theme_cancel
+}
+
+# The picker's status line, repainted at once: the apply that follows is
+# synchronous and the 200 ms variable tick never runs during it.
+proc ::lumen::theme_page_status { text } {
+    if { [catch {
+        set can [dui canvas]
+        $can itemconfigure lumen_th_status -text $text
+        update idletasks
+    } err] } {
+        msg -DEBUG "Lumen: picker status line: $err"
+    }
 }
 
 # ---- the page ------------------------------------------------------------
@@ -5299,11 +5559,14 @@ proc ::lumen::build_theme_page {} {
         -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
 
     dui add dtext $p [X 694] [Y 486] -width [X 452] -anchor nw -justify left \
-        -text [translate "Tap Done: the app closes; reopen it and every page is drawn in these colours."] \
+        -text [translate "Tap Done: every page switches to these colours at once. New colours take a few seconds to draw."] \
         -font $L(font_caption) -fill $C(ink_2) -tags [list lumen_thi_[incr n] lumen_thp_ink_2]
     dui add dtext $p [X 694] [Y 550] -width [X 452] -anchor nw -justify left \
         -text [translate "Contrast is guarded: labels and the accent always stay readable on the glass."] \
         -font $L(font_caption) -fill $C(ink_3) -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    # 0.47.0: status line for the live apply ("Drawing your theme..." /
+    # the failure), in the CURRENT theme's accent, blank otherwise.
+    txt $p 694 598 "" -font $L(font_caption) -fill $C(crema) -width 452 -tags lumen_th_status
 
     # ---- Cancel / Done ----
     txt $p 194 716 [translate "Cancel"] -font $L(font_button) -fill $C(crema)
