@@ -4,6 +4,28 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.50.0 - a wait pill counts the theme apply off - TABLET-VERIFIED 2026-09-16 20:10 (captures taken DURING the apply: "Applying Dark: colours and backgrounds...", "DYE pages 4 / 10...", "10 / 10..."; the pill changes to the new palette with the page; gone after; a stale press-flash chip seen on the THEME button mid-apply in the first run is now cleared when the pill appears; cycle custom -> dark -> light -> custom 4.5-4.9 s each, 0 problems, no errors)
+
+Base: 0.49.0. Owner report: cycling the themes "freezes the screen for a
+couple of seconds". The apply IS one synchronous stretch (about 1 s for
+the colours, 3.3 s for DYE's ten pages, plus ~11 s when a custom set has to
+be painted first) and cannot yield without letting taps land on half-built
+pages, so it now SAYS what it is doing. **Safety status: unchanged; no
+writes, no new reads; a transient canvas pill only.**
+
+- `::lumen::wait_show / wait_step / wait_hide`: a centred pill drawn
+  straight on `.can` (press-flash style), painted with `update idletasks`
+  before the work and on every step: "Applying Light theme...", then
+  "drawing the backgrounds (a few seconds)..." (custom only), "colours and
+  backgrounds...", "DYE pages 1 / 10..." per page, removed at the end,
+  also on a refused apply. The pill takes the new palette as soon as it
+  is loaded, so it changes sides with the page.
+- `_retheme_dye` rethemes one page per call so the count can advance.
+- Harness: pill drawn first, colours + per-page steps, removed last; the
+  bake step on a custom apply; per-page forced retheme calls in order.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.49.0 - the custom theme serves its own glass material to plugin popups - TABLET-VERIFIED 2026-09-16 20:03 (the owner's Graphite custom set redrawn at launch in 11.4 s, seven files; Shot analysis and Curve popups from the home page: ring cropped from the custom home art, seam-free against the page, card a dark frosted slab with the soft chip shape showing through; Dark and Light popups unchanged after live switches; 5x zooms clean; no errors)
 
 Base: 0.48.1. Owner report: the Shot analysis and Curve popups over a custom

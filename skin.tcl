@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.49.0  (custom theme serves its own glass material to plugin popups; see `variable version`)
+#  Version: 0.50.0  (wait pill with step progress while a theme applies; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.49.0"
+    variable version "0.50.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -3036,7 +3036,11 @@ proc ::lumen::act::_switch_theme { new } {
         msg -ERROR "Lumen: could not save the theme preference: $err"
         return 0
     }
-    if { [::lumen::apply_theme $new] } { return 1 }
+    # 0.50.0: the wait pill covers the whole synchronous apply.
+    ::lumen::wait_show "[translate {Applying}] [::lumen::_theme_word $new] [translate {theme...}]"
+    set applied [::lumen::apply_theme $new]
+    ::lumen::wait_hide
+    if { $applied } { return 1 }
     if { [catch {
         set ::settings(lumen_theme) $old
         save_settings
@@ -3730,6 +3734,66 @@ proc ::lumen::_flash_pts { px1 py1 px2 py2 r } {
 #          where a filled chip would flood the tile.
 #
 # Still no alpha anywhere: flat palette tones, one shared tag, 150ms.
+# 0.50.0: the WAIT PILL. A theme apply is one synchronous stretch of
+# 1-5 s (up to ~15 s when a custom set has to be painted first), during
+# which nothing on screen moves -- the owner read that as a freeze. This
+# is a centred pill drawn straight on .can (transient, like the press
+# flash) that names the step in progress; `update idletasks` paints it
+# before the work starts and after every step change. No user events are
+# processed in between, so nothing can be tapped under it, and the
+# 200 ms variable tick cannot run -- which is exactly why the text is
+# pushed by hand rather than bound to a variable. wait_step also
+# restyles the pill from the palette in force, so it changes sides the
+# moment set_palette has run.
+proc ::lumen::wait_show { text } {
+    variable C
+    variable L
+    if { [catch {
+        .can delete lumen_wait
+        # The tap that started this left its press flash on the button; its
+        # 150 ms timer cannot fire during the apply, so clear it here or it
+        # sits there in the OLD theme's fill until the end (seen on-tablet).
+        .can delete lumen_tapflash
+        set px1 [rescale_x_skin [X 390]] ; set py1 [rescale_y_skin [Y 352]]
+        set px2 [rescale_x_skin [X 950]] ; set py2 [rescale_y_skin [Y 448]]
+        set lw [expr {int(max(2, [rescale_y_skin 4]))}]
+        .can create polygon {*}[_flash_pts $px1 $py1 $px2 $py2 [rescale_y_skin 96]] -smooth 1 \
+            -fill $C(glass_2) -outline $C(crema) -width $lw -tags [list lumen_wait lumen_wait_pill]
+        .can create text [rescale_x_skin [X 670]] [rescale_y_skin [Y 400]] -text $text \
+            -font $L(font_primary) -fill $C(ink) -anchor center -justify center \
+            -tags [list lumen_wait lumen_wait_text]
+        update idletasks
+    } err] } {
+        msg -DEBUG "Lumen: wait pill: $err"
+    }
+}
+
+proc ::lumen::wait_step { text } {
+    variable C
+    if { [catch {
+        .can itemconfigure lumen_wait_pill -fill $C(glass_2) -outline $C(crema)
+        .can itemconfigure lumen_wait_text -text $text -fill $C(ink)
+        update idletasks
+    } err] } {
+        msg -DEBUG "Lumen: wait pill step: $err"
+    }
+}
+
+proc ::lumen::wait_hide {} {
+    if { [catch { .can delete lumen_wait } err] } {
+        msg -DEBUG "Lumen: wait pill hide: $err"
+    }
+}
+
+# The theme's name for the pill and the log.
+proc ::lumen::_theme_word { mode } {
+    switch -exact -- $mode {
+        light  { return [translate "Light"] }
+        custom { return [translate "Custom"] }
+        default { return [translate "Dark"] }
+    }
+}
+
 proc ::lumen::press_flash { x1 y1 x2 y2 {style zone} } {
     variable C
     if { [catch {
@@ -4530,7 +4594,9 @@ proc ::lumen::apply_theme { mode } {
     # Custom on photo pages needs its backgrounds before anything changes.
     # (Pages declared flat at load carry drawn panels and a plain fill, so
     # they retint without files.)
+    set word [_theme_word $mode]
     if { $mode eq "custom" && !$_flat_pages } {
+        wait_step "[translate {Applying}] $word: [translate {drawing the backgrounds (a few seconds)...}]"
         set baked 0
         if { [catch { set baked [::lumen::custom::ensure_bake] } err] } {
             msg -ERROR "Lumen: custom theme bake threw: $err"
@@ -4550,6 +4616,7 @@ proc ::lumen::apply_theme { mode } {
         custom  { set ::lumen::_bg_suffix "_custom" }
         default { set ::lumen::_bg_suffix "" }
     }
+    wait_step "[translate {Applying}] $word: [translate {colours and backgrounds...}]"
 
     set problems 0
     if { [catch { set can [dui canvas] ; $can configure -bg $C(bg) } err] } {
@@ -4693,11 +4760,16 @@ proc ::lumen::_retheme_dye {} {
         return 0
     }
     set t0 [clock milliseconds]
-    set n 0
-    foreach ok [dui page retheme $pages DYE_Lumen 1] {
-        if { [string is true -strict $ok] } { incr n }
+    set n 0 ; set i 0 ; set total [llength $pages]
+    # 0.50.0: one page per call so the wait pill can count them off.
+    set word [_theme_word $::lumen::theme_mode]
+    foreach p $pages {
+        wait_step "[translate {Applying}] $word: [translate {DYE pages}] [incr i] / $total..."
+        foreach ok [dui page retheme $p DYE_Lumen 1] {
+            if { [string is true -strict $ok] } { incr n }
+        }
     }
-    msg -INFO "Lumen: DYE rethemed, $n of [llength $pages] pages recreated in [expr {[clock milliseconds] - $t0}] ms"
+    msg -INFO "Lumen: DYE rethemed, $n of $total pages recreated in [expr {[clock milliseconds] - $t0}] ms"
     return $n
 }
 
