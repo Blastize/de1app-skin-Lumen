@@ -4,7 +4,7 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.47.0 - live retheme: a theme change applies in place, no quit-and-reopen - NOT YET TABLET-VERIFIED (harness PASSED; both palettes reverse-map cleanly; 211 role-tagged items)
+## 0.47.0 - live retheme: a theme change applies in place, no quit-and-reopen - TABLET-VERIFIED 2026-09-16 (THEME taps custom -> dark -> light -> custom on the settings page, each redrawn in 1.1-1.3 s with 0 problems; home eyeballed in light and custom, chart panel tones and series right; picker Done with Sea glass: "Drawing your theme..." shown, five backgrounds drawn in 7.4 s, settings returned in the new colours; Espresso preset restored the same way in 7.0 s over the same filenames, new pixels shown; no Lumen errors in the log; tablet left on home in the owner's Espresso theme)
 
 Base: 0.46.1. Custom theme pass 2 of 2. **Safety status: unchanged. No new
 writes; the same five prefs and `lumen_theme` are saved by the same taps,
