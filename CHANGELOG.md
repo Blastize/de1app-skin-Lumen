@@ -4,6 +4,31 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.49.0 - the custom theme serves its own glass material to plugin popups - TABLET-VERIFIED 2026-09-16 20:03 (the owner's Graphite custom set redrawn at launch in 11.4 s, seven files; Shot analysis and Curve popups from the home page: ring cropped from the custom home art, seam-free against the page, card a dark frosted slab with the soft chip shape showing through; Dark and Light popups unchanged after live switches; 5x zooms clean; no errors)
+
+Base: 0.48.1. Owner report: the Shot analysis and Curve popups over a custom
+page showed the DARK theme's home art in their ring and through the card.
+`glass_material` only knew dark and light and handed custom the dark files.
+**Safety status: TWO more files in the same place, same trigger:
+`lumen_home_glass_custom.png` and `lumen_home_dim_custom.png` join the
+custom set written by `ensure_bake` into `skins/Lumen/<WxH>/` (painter
+signature 3, so every existing custom set is redrawn once). Nothing else.**
+
+- `::lumen::custom::pages` gains `home_glass` and `home_dim`: home's own
+  panel table painted from a derived palette. `dim_gen` scales every
+  colour by the bake's dim factor (0.66 dark / 0.78 light). `glass_gen`
+  applies the bake's slab recipe (saturation, brightness, tint) and drops
+  border, specular and lift; the slab's panels are painted with the new
+  `soft` mode of `panel_png` (fill alpha ramps over the blur radius across
+  the edge) as the stand-in for the Gaussian blur pure Tcl cannot afford.
+- `glass_material` under custom serves the `_custom` trio and reports the
+  custom BASE (dark/light) as the consumer's colour set, never "custom".
+  A missing file still means no material, i.e. GrindAdvisor's opaque popup.
+- Harness: custom material against a scratch folder (served / refused),
+  the pages table, glass_gen / dim_gen, the soft ramp, signature 3.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.48.1 - retheme only DYE's own rebuildable pages - TABLET-VERIFIED 2026-09-16 19:43 (custom -> dark -> light -> custom: "DYE rethemed, 10 of 10 pages recreated" in 3.3-3.4 s each, whole apply 4.4-4.7 s, 0 problems; DYE editor plus its Edit data and Manage dialogs eyeballed in Light and again in Custom; the three foreign pages on the theme are listed at DEBUG and keep their items across every switch (8 / 19 items before and after); only the pre-existing D_Flow startup error in the log)
 
 Base: 0.48.0, first tablet run. **Safety status: unchanged.** The 0.48.0 run

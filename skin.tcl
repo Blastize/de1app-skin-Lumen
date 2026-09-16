@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.48.1  (DYE pages follow a live theme change; only DYE's own rebuildable pages are recreated; see `variable version`)
+#  Version: 0.49.0  (custom theme serves its own glass material to plugin popups; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.48.1"
+    variable version "0.49.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -2729,7 +2729,17 @@ proc ::lumen::glass_material {} {
     catch { set sw [winfo screenwidth .]; set sh [winfo screenheight .] }
     if { $sw <= 0 || $sh <= 0 } { return {} }
 
-    set suffix [expr {$theme_mode eq "light" ? "_light" : ""}]
+    # 0.49.0: the custom theme serves its own material, painted on the
+    # tablet by ensure_bake beside the page backgrounds (before this it
+    # got the DARK files: the popup's ring and see-through card showed
+    # the blue baked home art over a warm custom page -- owner report).
+    # The consumer's `theme` is the text-colour set it should use, so a
+    # custom theme reports its BASE (dark or light glass), never "custom".
+    switch -exact -- $theme_mode {
+        light   { set suffix "_light"  ; set theme light }
+        custom  { set suffix "_custom" ; set theme [dict get [::lumen::custom::prefs] base] }
+        default { set suffix ""        ; set theme dark }
+    }
     set dir "[homedir]/skins/Lumen/${sw}x${sh}"
     set glass "$dir/lumen_home_glass$suffix.png"
     set dim   "$dir/lumen_home_dim$suffix.png"
@@ -2741,7 +2751,7 @@ proc ::lumen::glass_material {} {
     set bg "$dir/lumen_home$suffix.png"
     if { ![file exists $glass] || ![file exists $dim] || ![file exists $bg] } { return {} }
 
-    return [dict create ok 1 page off theme $theme_mode radius 26 \
+    return [dict create ok 1 page off theme $theme radius 26 \
         glass $glass dim $dim bg $bg]
 }
 
@@ -3895,6 +3905,20 @@ namespace eval ::lumen::custom {
     dict set pages message [dict create out lumen_message bloom {670 300 460 260} \
         panels [list {270 200 800 300 26 plain}] \
         inner [list {90 714 240 72 16 raised} {1010 714 240 72 16 accent}]]
+    # 0.49.0: the glass material for plugin overlays (::lumen::glass_material),
+    # two more takes of the home page: `glass` is the frosted slab the
+    # popup card is cropped from, `dim` the scrim around it. Same panels
+    # as home, painted from a derived palette (see glass_gen / dim_gen);
+    # the slab's panels get soft edges in place of the bake's Gaussian
+    # blur, which pure Tcl cannot afford on a full screen.
+    dict set pages home_glass [dict merge [dict get $pages home] [dict create out lumen_home_glass variant glass]]
+    dict set pages home_dim   [dict merge [dict get $pages home] [dict create out lumen_home_dim variant dim]]
+    # make_backgrounds.py GLASS, per base: tint rgb, tint alpha, dim
+    # factor, saturation, brightness, blur radius (design px).
+    variable glass_params
+    set glass_params [dict create \
+        dark  [dict create tint {16 18 24}    tint_a 0.20 dim 0.66 sat 1.50 bright 1.28 blur 16] \
+        light [dict create tint {246 248 251} tint_a 0.38 dim 0.78 sat 1.15 bright 1.00 blur 20]]
     unset -nocomplain _home_inner _c _x _set_panels _set_inner _y _gy
 }
 
@@ -3954,6 +3978,51 @@ proc ::lumen::custom::mix { a b t } {
     set out {}
     foreach x $a y $b { lappend out [expr {$x + ($y - $x) * $t}] }
     return $out
+}
+
+# 0.49.0 colour maths for the glass material. `_tone` scales brightness
+# and saturation (the latter around the plain luma), `_tint` blends
+# toward a colour; both clamp to 0..255 and work on rgb lists.
+proc ::lumen::custom::_tone { rgb bright sat } {
+    lassign $rgb r g b
+    set l [expr {0.299 * $r + 0.587 * $g + 0.114 * $b}]
+    set out {}
+    foreach v [list $r $g $b] {
+        set v [expr {($l + ($v - $l) * $sat) * $bright}]
+        lappend out [expr {max(0.0, min(255.0, $v))}]
+    }
+    return $out
+}
+proc ::lumen::custom::_tint { rgb tint a } { return [mix $rgb $tint $a] }
+
+# The painter parameters for the frosted SLAB: the bake's recipe
+# (saturation and brightness up, then the tint) applied to the ground
+# and the panel fills, no borders, no specular, no lift -- a blur has
+# none of those -- and the same shadow, which the blur spreads anyway.
+proc ::lumen::custom::glass_gen { P } {
+    variable glass_params
+    set g [dict get $glass_params [dict get $P base]]
+    set G [dict get $P gen]
+    set tint [dict get $g tint] ; set ta [dict get $g tint_a]
+    set br [dict get $g bright] ; set sa [dict get $g sat]
+    foreach k {top bot accfill_rgb bloom_rgb lo_rgb} {
+        dict set G $k [_tint [_tone [dict get $G $k] $br $sa] $tint $ta]
+    }
+    dict set G white [_tint {255 255 255} $tint $ta]
+    dict set G brd_a 0.0 ; dict set G brdacc_a 0.0 ; dict set G spec_a 0.0 ; dict set G lift_a 0.0
+    return [dict replace $P gen $G]
+}
+
+# The painter parameters for the DIMMED page (the modal scrim): every
+# colour scaled by the base's dim factor, alphas untouched.
+proc ::lumen::custom::dim_gen { P } {
+    variable glass_params
+    set f [dict get [dict get $glass_params [dict get $P base]] dim]
+    set G [dict get $P gen]
+    foreach k {top bot white brd_rgb spec_rgb acc lo_rgb brdacc_rgb accfill_rgb bloom_rgb} {
+        dict set G $k [_tone [dict get $G $k] $f 1.0]
+    }
+    return [dict replace $P gen $G]
 }
 
 # The saved preferences, clamped; unknown or missing values take the
@@ -4141,7 +4210,12 @@ proc ::lumen::custom::_px { c rgb a shrgb sa } {
 # match one tone). Per-pixel work is confined to the margins, the corner
 # bands, the two specular rows and the top-lift rows; identical rows are
 # painted once (memo by shadow factor and row alpha).
-proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} } {
+# 0.49.0 `soft`: > 0 paints a BLURRED look-alike for the glass material --
+# the fill's alpha ramps over `soft` px across the panel edge (1 inside,
+# 0.5 on the edge, 0 outside, the shadow's own _fall profile) instead of
+# the one-pixel anti-aliased edge, and there is no border and no specular.
+# The caller keeps S >= soft so the ramp fits the margin.
+proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} {soft 0} } {
     set G [dict get $P gen]
     set white [dict get $G white]
     set shrgb [dict get $G shadow_rgb] ; set sha [dict get $G shadow_a]
@@ -4158,7 +4232,8 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} } {
     if { $rr * 2 > $h } { set rr [expr {$h / 2}] }
     set W [expr {$w + 2 * $S}] ; set H [expr {$h + 2 * $S}]
     set hw [expr {$w / 2.0}] ; set hh [expr {$h / 2.0}]
-    set zone [expr {$S + $rr + 2}]           ;# per-pixel columns each side
+    set edge [expr {max($rr, $soft)}]
+    set zone [expr {$S + $edge + 2}]         ;# per-pixel columns each side
     if { 2 * $zone >= $W } { set zone [expr {$W / 2}] }
     set span [expr {$flat ? 0 : int($h * 0.85)}]
     set rows {}
@@ -4180,25 +4255,32 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} } {
         # Quantised to what a PNG byte can hold, so consecutive lift rows
         # that round to the same alpha share one painted row.
         set fa_row [expr {int(round(($fa + $la - $fa * $la) * 255.0)) / 255.0}]
-        set spec_row [expr {$cy == 1 || $cy == 2}]
-        set straight [expr {$inner_row && $cy > $rr && $cy < $h - $rr - 1}]
+        set spec_row [expr {($cy == 1 || $cy == 2) && !$soft}]
+        set straight [expr {$inner_row && $cy > $edge && $cy < $h - $edge - 1}]
         set key "[expr {int(round($fy * 255.0))}]|[expr {int(round($fa_row * 255.0))}]"
         if { $straight && [info exists memo($key)] } {
             lappend rows $memo($key)
             continue
         }
         set row ""
-        if { $straight } {
-            set midc 1.0 ; set midd -2.0
-        } elseif { $inner_row } {
-            set midc 1.0 ; set midd [expr {abs($py) - $hh}]
-        } else {
-            set midc 0.0 ; set midd 1.0
-        }
-        if { $midd > -1.0 && $midc > 0.0 } {
-            set midpx [_px $midc $brd $ba $shrgb [expr {$sha * $fy}]]
-        } else {
+        if { $soft } {
+            # Middle stretch of a soft panel: the vertical distance alone.
+            set midd [expr {abs($py) - $hh}]
+            set midc [_fall $midd $soft]
             set midpx [_px $midc $fill $fa_row $shrgb [expr {$sha * $fy}]]
+        } else {
+            if { $straight } {
+                set midc 1.0 ; set midd -2.0
+            } elseif { $inner_row } {
+                set midc 1.0 ; set midd [expr {abs($py) - $hh}]
+            } else {
+                set midc 0.0 ; set midd 1.0
+            }
+            if { $midd > -1.0 && $midc > 0.0 } {
+                set midpx [_px $midc $brd $ba $shrgb [expr {$sha * $fy}]]
+            } else {
+                set midpx [_px $midc $fill $fa_row $shrgb [expr {$sha * $fy}]]
+            }
         }
         for { set x 0 } { $x < $W } { incr x } {
             if { $x == $zone && !$spec_row } {
@@ -4211,11 +4293,15 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} } {
             set qx [expr {abs($px) - ($hw - $rr)}]
             set mx [expr {$qx > 0.0 ? $qx : 0.0}] ; set my [expr {$qy > 0.0 ? $qy : 0.0}]
             set d [expr {sqrt($mx * $mx + $my * $my) + min(max($qx, $qy), 0.0) - $rr}]
-            set c [expr {0.5 - $d}]
-            if { $c > 1.0 } { set c 1.0 } elseif { $c < 0.0 } { set c 0.0 }
+            if { $soft } {
+                set c [_fall $d $soft]
+            } else {
+                set c [expr {0.5 - $d}]
+                if { $c > 1.0 } { set c 1.0 } elseif { $c < 0.0 } { set c 0.0 }
+            }
             set dxs [expr {max(-($cx + 0.5), ($cx + 0.5) - $w)}]
             set sa [expr {$sha * $fy * [_fall $dxs $S]}]
-            if { $c > 0.0 && $d > -1.0 } {
+            if { !$soft && $c > 0.0 && $d > -1.0 } {
                 append row [_px $c $brd $ba $shrgb $sa]
             } elseif { $spec_row && $c > 0.0 && $cx >= $rr && $cx < $w - $rr } {
                 # The specular run: fades to nothing at both ends (a plain
@@ -4281,8 +4367,17 @@ proc ::lumen::custom::_paste { img src tx ty z } {
 # Draws ONE page background at W x H physical px into a Tk photo and
 # returns its name (caller deletes). Needs Tk.
 proc ::lumen::custom::page_photo { P spec W H } {
-    set G [dict get $P gen]
     set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
+    # 0.49.0: the two material takes paint the same layout from a derived
+    # palette; the slab also softens every edge (blur stand-in).
+    set soft 0
+    switch -exact -- [expr {[dict exists $spec variant] ? [dict get $spec variant] : ""}] {
+        glass { set P [glass_gen $P]
+                variable glass_params
+                set soft [expr {int(round([dict get [dict get $glass_params [dict get $P base]] blur] * $sy))}] }
+        dim   { set P [dim_gen $P] }
+    }
+    set G [dict get $P gen]
     set top [dict get $G top] ; set bot [dict get $G bot]
 
     # Backdrop: a one-column photo, one put per row, zoomed to the width.
@@ -4308,6 +4403,7 @@ proc ::lumen::custom::page_photo { P spec W H } {
     # blur sigma 9 (S = 2 sigma = 18) offset 6 design px. The chart panels
     # (the second panel of flow_chart, the third of home) are flat.
     set S [expr {int(round(18 * $sy))}] ; set dy [expr {int(round(6 * $sy))}]
+    if { $soft > $S } { set S $soft }
     foreach group {panels inner} {
         set i 0
         foreach item [dict get $spec $group] {
@@ -4316,7 +4412,7 @@ proc ::lumen::custom::page_photo { P spec W H } {
                             && (([dict get $spec out] eq "lumen_home" && $i == 2) \
                              || ([dict get $spec out] eq "lumen_flow_chart" && $i == 0))}]
             set pw [expr {int(round($w * $sx))}] ; set ph [expr {int(round($h * $sy))}]
-            set png [panel_png $P $pw $ph [expr {int(round($r * $sy))}] $kind $S $dy $flat]
+            set png [panel_png $P $pw $ph [expr {int(round($r * $sy))}] $kind $S $dy $flat $soft]
             set pi [image create photo -data $png]
             _paste $img $pi [expr {int(round($x * $sx)) - $S}] [expr {int(round($y * $sy)) - $S}] 1
             image delete $pi
@@ -4339,7 +4435,8 @@ proc ::lumen::custom::screen {} {
 # is the PAINTER version: bump it whenever the painter changes so files
 # drawn by an older one are redrawn (2 = 0.46.1's shadow-under-glass model).
 proc ::lumen::custom::signature { pr } {
-    return "2 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
+    # 3 = 0.49.0: the glass material files joined the set.
+    return "3 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
 }
 
 # Makes sure lumen_*_custom.png exist for the screen and match the saved

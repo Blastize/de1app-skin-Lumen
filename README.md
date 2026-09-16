@@ -8,7 +8,13 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.48.1 — every page built, baked and running on the tablet.**
+**Version 0.49.0 — every page built, baked and running on the tablet.**
+
+New in 0.49.0: **glass popups in your own colours.** Grind Advisor's
+Shot analysis and Curve popups over a custom theme used to show the dark
+theme's home art around and through the card; the custom theme now
+paints its own frosted slab and dimmed scrim beside its backgrounds and
+serves them to the popup.
 
 New in 0.48.0: **DYE follows the theme.** The Describe Your Espresso
 editor and its dialogs now take the new colours the moment you switch,
