@@ -4,7 +4,19 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.48.0 - DYE's pages follow a live theme change - NOT YET TABLET-VERIFIED (harness PASSED)
+## 0.48.1 - retheme only DYE's own rebuildable pages - TABLET-VERIFIED 2026-09-16 19:43 (custom -> dark -> light -> custom: "DYE rethemed, 10 of 10 pages recreated" in 3.3-3.4 s each, whole apply 4.4-4.7 s, 0 problems; DYE editor plus its Edit data and Manage dialogs eyeballed in Light and again in Custom; the three foreign pages on the theme are listed at DEBUG and keep their items across every switch (8 / 19 items before and after); only the pre-existing D_Flow startup error in the log)
+
+Base: 0.48.0, first tablet run. **Safety status: unchanged.** The 0.48.0 run
+worked for DYE (editor + dialogs in Light and Custom, 11 pages in ~3.5 s,
+0 problems) but its page filter was "every page on the DYE_Lumen theme",
+and two OTHER plugins' pages sit on that theme because they were added while
+it was current (DPx_SS_options, history_exclusion_filter); both are
+namespace-less, so the recreate deleted them and could not redraw them
+(empty until restart). Now only pages named `DYE*`/`dye_*` whose namespace
+has a `setup` proc are rethemed; the rest are listed at DEBUG and keep
+their look. Harness: three stray pages on the theme must be left alone.
+
+## 0.48.0 - DYE's pages follow a live theme change - superseded by 0.48.1 before verification (first tablet run 2026-09-16 19:39: DYE editor, Edit data and Manage dialogs correct in Light and Custom; two foreign pages emptied, see 0.48.1)
 
 Base: 0.47.0. Custom theme pass 3. **Safety status: unchanged. No new writes
 of any kind; DYE's data arrays and its persistence are untouched -- only its

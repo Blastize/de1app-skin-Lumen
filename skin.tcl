@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.48.0  (DYE pages follow a live theme change; see `variable version`)
+#  Version: 0.48.1  (DYE pages follow a live theme change; only DYE's own rebuildable pages are recreated; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.48.0"
+    variable version "0.48.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -4571,9 +4571,23 @@ proc ::lumen::_redraw_photo_panels {} {
 proc ::lumen::_retheme_dye {} {
     if { ![string is true -strict [dui theme exists DYE_Lumen]] } { return 0 }
     dye_aspects
-    set pages [list]
+    set pages [list] ; set skipped [list]
     foreach p [dui page list] {
-        if { [dui page theme $p] eq "DYE_Lumen" } { lappend pages $p }
+        if { [dui page theme $p] ne "DYE_Lumen" } { continue }
+        # 0.48.1: only DYE's own pages, and only those dui can rebuild. A
+        # page without a namespace `setup` proc comes back EMPTY from a
+        # recreate (the delete succeeds, nothing redraws it). Other
+        # plugins' pages land on this theme when they are added while it
+        # is current (seen on the tablet: DPx_SS_options and
+        # history_exclusion_filter, both namespace-less); they keep their
+        # look, as before 0.48.0.
+        if { ![string match {DYE*} $p] && ![string match {dye_*} $p] } { lappend skipped $p ; continue }
+        set ns [dui page get_namespace $p]
+        if { $ns eq "" || [info procs ${ns}::setup] eq "" } { lappend skipped $p ; continue }
+        lappend pages $p
+    }
+    if { [llength $skipped] } {
+        msg -DEBUG "Lumen: pages on DYE_Lumen left alone (not DYE's, or no setup): $skipped"
     }
     if { [llength $pages] == 0 } { return 0 }
     set cur [dui page current]
