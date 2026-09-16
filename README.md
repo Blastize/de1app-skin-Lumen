@@ -8,7 +8,11 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.47.0 — every page built, baked and running on the tablet.**
+**Version 0.48.0 — every page built, baked and running on the tablet.**
+
+New in 0.48.0: **DYE follows the theme.** The Describe Your Espresso
+editor and its dialogs now take the new colours the moment you switch,
+like every Lumen page; nothing waits for the next launch any more.
 
 New in 0.47.0: **themes switch live.** Tap THEME and the page you are on
 changes to Dark, Light or Custom on the spot; tap Done in the colour
@@ -328,9 +332,11 @@ on screen before your finger lifts (0.47.0). Every item a Lumen helper
 draws carries a role tag naming the palette token it took its colour from
 (`lumen_c_ink`, `lumen_o_glass_brd`, ...), so a theme is one
 `itemconfigure` per token; the page backgrounds swap their photo through
-dui's own image resolver. Two things follow on the next launch instead:
-DYE's editor pages (styled by a dui theme registered once at plugin init)
-and Grind Advisor's popup, which reads the theme when it opens.
+dui's own image resolver. DYE's pages are styled by a dui theme
+(`DYE_Lumen`) whose aspects are read when each page is set up, so a theme
+change sets those aspects again and hands every page on that theme to
+dui's own `page retheme`, which recreates it (0.48.0). Grind Advisor's
+popup reads the theme when it opens, so it follows by itself.
 
 Until 0.46.1 a theme change quit the app, because **the app cannot reopen
 itself** on Android 16 — `am start` from the app's uid is rejected by the

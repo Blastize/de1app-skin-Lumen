@@ -4,6 +4,27 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.48.0 - DYE's pages follow a live theme change - NOT YET TABLET-VERIFIED (harness PASSED)
+
+Base: 0.47.0. Custom theme pass 3. **Safety status: unchanged. No new writes
+of any kind; DYE's data arrays and its persistence are untouched -- only its
+canvas items and widgets are recreated, by dui's own page machinery.**
+
+- The DYE_Lumen aspects moved out of the `setup_ui_Lumen` hook into
+  `::lumen::dye_aspects`, called by the hook at DYE init and again by
+  `apply_theme` from the new palette.
+- `::lumen::_retheme_dye` (step 6 of apply_theme): every page whose
+  `dui page theme` is DYE_Lumen goes through `dui page retheme ... 1`
+  (delete keeping its data, add with the saved arguments, run the page's
+  setup) -- the mechanism dui itself names for an already-set-up page. No
+  DYE file is edited. Skipped with a NOTICE if a DYE page is on screen
+  (never the case from the THEME row or the picker); nothing happens when
+  the theme does not exist (DYE absent).
+- Harness: aspects re-set from the new palette exactly once per apply, the
+  three fake DYE pages rethemed forced, the on-screen guard, DYE absent.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.47.0 - live retheme: a theme change applies in place, no quit-and-reopen - TABLET-VERIFIED 2026-09-16 (THEME taps custom -> dark -> light -> custom on the settings page, each redrawn in 1.1-1.3 s with 0 problems; home eyeballed in light and custom, chart panel tones and series right; picker Done with Sea glass: "Drawing your theme..." shown, five backgrounds drawn in 7.4 s, settings returned in the new colours; Espresso preset restored the same way in 7.0 s over the same filenames, new pixels shown; no Lumen errors in the log; tablet left on home in the owner's Espresso theme. Colour audit via DevBridge 0.3.2: 286 coloured options over all nine Lumen pages, flow pages included, 0 stale in each theme; 5x zooms artefact-free. Known gap: DYE's pages keep the launch palette until the next start)
 
 Base: 0.46.1. Custom theme pass 2 of 2. **Safety status: unchanged. No new

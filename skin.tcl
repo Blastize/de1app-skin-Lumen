@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.47.0  (live retheme: a theme change applies in place, no quit-and-reopen; see `variable version`)
+#  Version: 0.48.0  (DYE pages follow a live theme change; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.47.0"
+    variable version "0.48.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -4405,10 +4405,11 @@ proc ::lumen::custom::ensure_bake {} {
 #       painter parameters, the graph widgets restyled, the picker's
 #       selection rings refreshed.
 #
-#  Not covered, by design: DYE's editor pages take their colours from the
-#  DYE_Lumen dui theme registered once at plugin init (they follow on the
-#  next launch), and the GrindAdvisor glass popup reads glass_material
-#  when it opens, so it follows by itself.
+#    6. (0.48.0) DYE's pages: the DYE_Lumen aspects are set again and every
+#       page on that theme goes through dui's own `page retheme`.
+#
+#  The GrindAdvisor glass popup reads glass_material when it opens, so it
+#  follows by itself.
 #############################################################################
 
 # Applies `mode` (dark | light | custom) live. Returns 1 when the theme is
@@ -4473,6 +4474,9 @@ proc ::lumen::apply_theme { mode } {
     }
     if { [catch { _retheme_charts } err] } {
         msg -ERROR "Lumen: could not restyle the charts: $err" ; incr problems
+    }
+    if { [catch { _retheme_dye } err] } {
+        msg -ERROR "Lumen: could not retheme the DYE pages: $err" ; incr problems
     }
     # The picker's selection rings and base pills read C() -- refresh_preview
     # logs its own failures.
@@ -4553,6 +4557,37 @@ proc ::lumen::_redraw_photo_panels {} {
         $can itemconfigure $tag -image $img
         if { $old ne "" && $old ne $img } { image delete $old }
     }
+}
+
+# 0.48.0: DYE's pages follow. They are styled by the DYE_Lumen dui theme,
+# whose aspects were read when the pages were set up, so: set the aspects
+# again from the new palette, then hand every page on that theme to dui's
+# own `page retheme` (delete keeping its data, add again with the saved
+# arguments, run the page's setup) -- the mechanism dui names for exactly
+# this in its "already setup" warning. Returns the number of pages redone.
+# Skipped, with a NOTICE, if a DYE page is the one on screen (dui refuses
+# to delete the current page); nothing else is ever on screen while the
+# THEME row or the picker's Done runs, so this is a guard, not a path.
+proc ::lumen::_retheme_dye {} {
+    if { ![string is true -strict [dui theme exists DYE_Lumen]] } { return 0 }
+    dye_aspects
+    set pages [list]
+    foreach p [dui page list] {
+        if { [dui page theme $p] eq "DYE_Lumen" } { lappend pages $p }
+    }
+    if { [llength $pages] == 0 } { return 0 }
+    set cur [dui page current]
+    if { $cur in $pages } {
+        msg -NOTICE "Lumen: DYE page '$cur' is on screen, DYE keeps its colours until the next launch"
+        return 0
+    }
+    set t0 [clock milliseconds]
+    set n 0
+    foreach ok [dui page retheme $pages DYE_Lumen 1] {
+        if { [string is true -strict $ok] } { incr n }
+    }
+    msg -INFO "Lumen: DYE rethemed, $n of [llength $pages] pages recreated in [expr {[clock milliseconds] - $t0}] ms"
+    return $n
 }
 
 # The graph widgets: opaque Tk widgets, so their backgrounds are the
@@ -5919,6 +5954,16 @@ proc ::lumen::build_settings {} {
 namespace eval ::plugins::DYE {}
 
 proc ::plugins::DYE::setup_ui_Lumen {} {
+    dui theme add DYE_Lumen
+    dui theme set DYE_Lumen
+    ::lumen::dye_aspects
+    msg -INFO "Lumen: DYE styled with the DYE_Lumen theme"
+}
+
+# The DYE_Lumen aspects from the CURRENT palette. 0.48.0: split out of the
+# hook so a live theme change can set them again before the DYE pages are
+# recreated (::lumen::_retheme_dye). Fonts and sizes never change.
+proc ::lumen::dye_aspects {} {
     set C_bg      $::lumen::C(bg)
     set C_panel   $::lumen::C(glass)
     set C_panel2  $::lumen::C(glass_2)
@@ -5932,9 +5977,6 @@ proc ::plugins::DYE::setup_ui_Lumen {} {
     set font  [::lumen::_font_family sans]
     set fontb [::lumen::_font_family sans_semi]
     set base  16
-
-    dui theme add DYE_Lumen
-    dui theme set DYE_Lumen
 
     dui aspect set -theme DYE_Lumen [subst {
         page.bg_img {}
@@ -6019,8 +6061,6 @@ proc ::plugins::DYE::setup_ui_Lumen {} {
         dcheckbox.fill $C_ink
         dcheckbox.disabledfill $C_ink3
     }]
-
-    msg -INFO "Lumen: DYE styled with the DYE_Lumen theme"
 }
 
 #############################################################################
