@@ -4,6 +4,36 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.46.0 - Custom theme: your own backdrop and accent, drawn on the tablet
+
+Base: 0.45.0. **Safety status: TWO new write capabilities, both confined to
+Lumen's own data. (1) Five preferences `lumen_custom_base|bh|bs|ah|as`
+plus `lumen_theme=custom`, written only by the picker page's Done through
+`save_settings`. (2) Five PNG files `lumen_<page>_custom.png` and a
+`lumen_custom.sig` stamp written into `skins/Lumen/<WxH>/` at skin load
+when the custom theme is active and the stamp disagrees with the saved
+colours. Nothing in history/, history_v2/ or any database is touched.**
+
+- THEME cycles Dark -> Light -> Custom; the row's caption opens the new
+  `lumen_theme` picker: BASE (dark/light), BACKDROP and ACCENT (12 hue
+  swatches each), six PRESETS, and a PREVIEW column redrawn from the pending
+  colours on every tap (role-tagged canvas items). Done saves and applies
+  through the existing quit-and-reopen; Cancel discards.
+- `::lumen::custom::palette` derives every token from the five inputs, with
+  a contrast guard (labels >= 4.5:1, accent >= 3:1 against the glass) that
+  the harness proves over 864 palettes; semantic and chart colours stay.
+- `::lumen::custom::ensure_bake` draws the five page backgrounds in pure
+  Tcl (gradient column zoomed wide, panels and pills as alpha PNGs with
+  outside-only soft shadows, quarter-scale bloom) and writes them where dui
+  already looks. ~1.3 s of painting on the PC; expect several seconds on
+  the tablet, once per colour change. On failure the pages fall back to
+  `-bg_color` plus vector glass, never blank. GrindAdvisor's glass popup
+  stays opaque under Custom (no glass slab is drawn for it).
+- Harness: palette guard, PNG decode + pixel probes, prefs clamp, theme
+  cycle, apply + restart-once, preview refresh, picker zones.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.45.0 - LOW WATER threshold row fills the settings page's fourth slot - TABLET-VERIFIED 2026-09-15 (dark theme via DevBridge: "300 ml" between its pills, caption on two lines clear of the group, columns level; no log errors)
 
 Base: 0.44.0. **Safety status: ONE new preference write, `lumen_water_low_ml`

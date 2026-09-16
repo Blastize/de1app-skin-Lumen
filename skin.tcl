@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.45.0  (LOW WATER threshold row fills the settings' fourth slot; see `variable version`)
+#  Version: 0.46.0  (Custom theme: your own backdrop and accent, drawn on the tablet; see `variable version`)
 #
 #
 #
@@ -30,7 +30,11 @@ package require de1plus 1.0
 #  clamps its value so a runaway tap cannot write junk.
 #
 #  Preferences (Lumen settings page):
-#    lumen_theme                     -- Dark/Light toggle
+#    lumen_theme                     -- dark | light | custom
+#    lumen_custom_base, lumen_custom_bh, lumen_custom_bs, lumen_custom_ah,
+#    lumen_custom_as                 -- the custom theme's five inputs
+#                                       (0.46.0; written by the picker's
+#                                       Done only, clamped on read)
 #  (0.36.0: the chart's Raw/Smooth and Stages pills are GONE, owner
 #  request -- Lumen's charts are always smooth (catrom) with stage
 #  separators shown; live_graph_smoothing_technique and
@@ -98,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.45.0"
+    variable version "0.46.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -203,7 +207,18 @@ proc ::lumen::set_palette { mode } {
     array unset C
     array set C {}
 
-    if { $mode eq "light" } {
+    if { $mode eq "custom" } {
+        # 0.46.0: every token derived from the five saved preferences (see
+        # ::lumen::custom::palette); the semantic and chart colours inside
+        # it come from the matching baked base.
+        set pr [::lumen::custom::prefs]
+        set P [::lumen::custom::palette [dict get $pr base] [dict get $pr bh] \
+                   [dict get $pr bs] [dict get $pr ah] [dict get $pr as]]
+        foreach k {bg glass glass_2 glass_brd spec ink ink_2 ink_3 crema crema_lo crema_brd \
+                   good warn danger c_press c_flow c_temp c_weight grid chart_bg chart_bg_flow} {
+            set C($k) [dict get $P $k]
+        }
+    } elseif { $mode eq "light" } {
         set C(bg)          "#E9EDF3"
         set C(glass)       "#F8F9FB"
         set C(glass_2)     "#FBFCFD"
@@ -1782,20 +1797,20 @@ proc ::lumen::data::theme_label {} {
     set m $::lumen::theme_mode
     if { $::lumen::pending_theme ne "" } { set m $::lumen::pending_theme }
     if { $m eq "dark" } { return [translate "Dark"] }
+    if { $m eq "custom" } { return [translate "Custom"] }
     return [translate "Light"]
 }
 
 # 0.43.1 copy: the app CLOSES and cannot reopen itself (Android 16, see
 # restart_for_theme); "restarts" promised something it never did.
+# 0.46.0: the caption is also the tap that opens the colour picker.
 proc ::lumen::data::theme_note {} {
     if { $::lumen::pending_theme eq "" \
       || $::lumen::pending_theme eq $::lumen::theme_mode } {
-        return [translate "Tap to switch. The app closes; reopen it to apply."]
+        return [translate "Dark, Light or Custom. Tap here to pick your colours."]
     }
-    if { $::lumen::pending_theme eq "light" } {
-        return [translate "Light selected. Tap Done: the app closes, reopen it."]
-    }
-    return [translate "Dark selected. Tap Done: the app closes, reopen it."]
+    set m [theme_label]
+    return "$m [translate {selected. Tap Done: the app closes, reopen it.}]"
 }
 
 proc ::lumen::data::version_line {} {
@@ -2884,7 +2899,13 @@ proc ::lumen::act::toggle_theme {} {
     # produced the same result and you could never switch back.
     set cur $::lumen::theme_mode
     if { $::lumen::pending_theme ne "" } { set cur $::lumen::pending_theme }
-    set new [expr {$cur eq "dark" ? "light" : "dark"}]
+    # 0.46.0: three-way cycle Dark -> Light -> Custom -> Dark. Custom uses
+    # the colours last saved by the picker (Lumen-dark defaults if none).
+    switch -exact -- $cur {
+        dark    { set new light }
+        light   { set new custom }
+        default { set new dark }
+    }
     if { [catch {
         set ::settings(lumen_theme) $new
         save_settings
@@ -3709,6 +3730,530 @@ proc ::lumen::tap { page x y w h command label {style zone} } {
 }
 
 #############################################################################
+#  Custom theme (0.46.0)
+#
+#  A third theme beside the two baked ones. The owner picks a BASE (dark or
+#  light glass), a BACKDROP hue and tint strength, and an ACCENT hue and
+#  saturation; everything else is derived (::lumen::custom::palette). The
+#  page backgrounds cannot be baked ahead of time for arbitrary colours, so
+#  they are drawn ON THE TABLET in pure Tcl (::lumen::custom::bake): the
+#  gradient as a one-column photo zoomed to the page width, every panel and
+#  pill as an RGBA PNG with a soft shadow (DrinkMenu v1.12.0's encoder
+#  pattern), composited over it and written to lumen_<page>_custom.png in
+#  the resolution folder dui already resolves. A signature file records the
+#  colours they were drawn from, so a launch with unchanged colours draws
+#  nothing. If drawing fails the pages fall back to -bg_color plus the
+#  vector glass primitive -- a generation behind, never blank.
+#
+#  Preferences (all Lumen, never sent to the machine), written only by the
+#  picker page's Done: lumen_custom_base dark|light, lumen_custom_bh 0..360,
+#  lumen_custom_bs 0..70, lumen_custom_ah 0..360, lumen_custom_as 20..100,
+#  and lumen_theme = custom. Applying still uses the quit-and-reopen the
+#  other themes use; a live retheme is a later pass.
+#############################################################################
+
+namespace eval ::lumen::custom {
+    # Pending picker state (what the preview shows); committed by Done.
+    variable pend
+    array set pend {base dark bh 222 bs 32 ah 34 as 86}
+
+    # Swatch hues, six per row on the picker.
+    variable hues {0 30 45 60 100 150 180 200 222 250 280 320}
+
+    # name base bh bs ah as
+    variable presets {
+        {Lumen dark}  dark  222 32 34  86
+        {Lumen light} light 220 30 34  76
+        {Espresso}    dark  25  40 40  90
+        {Sea glass}   light 190 40 165 70
+        {Rose}        dark  330 34 350 80
+        {Graphite}    dark  222 0  200 60
+    }
+
+    # Design-px page tables, mirroring tools/make_backgrounds.py exactly:
+    # panels {x y w h r kind}, inner pills the same, bloom {cx cy rx ry}.
+    variable pages
+    set pages [dict create]
+    set _home_inner [list {492 84 150 26 13 accent} \
+        {520 722 240 48 16 plain} {790 722 240 48 16 accent} {1060 722 240 48 16 accent} \
+        {40 722 44 48 16 plain} {96 722 160 48 16 plain} {268 722 44 48 16 plain}]
+    foreach _c {0 1 2} {
+        set _x [expr {520 + $_c * 270}]
+        lappend _home_inner [list $_x 642 44 48 16 plain] [list [expr {$_x + 196}] 642 44 48 16 plain]
+    }
+    dict set pages home [dict create out lumen_home bloom {340 168 430 260} \
+        panels [list {16 64 650 190 26 accent} {682 64 642 190 26 plain} \
+                     {16 270 1308 288 26 plain} {16 574 1308 210 26 plain}] \
+        inner $_home_inner]
+    set _set_panels {} ; set _set_inner {}
+    foreach _y {110 244 378 512} {
+        lappend _set_panels [list 170 $_y 460 118 26 plain] [list 670 $_y 500 118 26 plain]
+        set _gy [expr {$_y + 35}]
+        lappend _set_inner [list 402 $_gy 44 48 16 plain] [list 562 $_gy 44 48 16 plain]
+    }
+    foreach _y {244 512} {
+        set _gy [expr {$_y + 35}]
+        lappend _set_inner [list 942 $_gy 44 48 16 plain] [list 1102 $_gy 44 48 16 plain]
+    }
+    lappend _set_inner {996 141 150 56 16 raised} {894 409 130 56 16 raised} \
+        {1036 409 110 56 16 raised} {550 690 240 72 16 accent}
+    dict set pages settings [dict create out lumen_settings bloom {670 60 520 240} \
+        panels $_set_panels inner $_set_inner]
+    dict set pages flow_chart [dict create out lumen_flow_chart bloom {670 90 460 260} \
+        panels [list {16 186 1308 318 26 plain} {170 520 1000 150 26 plain}] inner {}]
+    dict set pages flow_plain [dict create out lumen_flow bloom {670 200 460 280} \
+        panels [list {170 420 1000 170 26 plain}] inner {}]
+    dict set pages message [dict create out lumen_message bloom {670 300 460 260} \
+        panels [list {270 200 800 300 26 plain}] \
+        inner [list {90 714 240 72 16 raised} {1010 714 240 72 16 accent}]]
+    unset -nocomplain _home_inner _c _x _set_panels _set_inner _y _gy
+}
+
+# ---- colour maths (pure Tcl, harness-tested) -----------------------------
+
+proc ::lumen::custom::hsl_rgb { h s l } {
+    set h [expr {fmod(double($h), 360.0)}] ; if { $h < 0 } { set h [expr {$h + 360.0}] }
+    set s [expr {double($s) / 100.0}] ; set l [expr {double($l) / 100.0}]
+    set a [expr {$s * min($l, 1.0 - $l)}]
+    set out {}
+    foreach n {0 8 4} {
+        set k [expr {fmod($n + $h / 30.0, 12.0)}]
+        set v [expr {$l - $a * max(-1.0, min($k - 3.0, min(9.0 - $k, 1.0)))}]
+        lappend out [expr {int(round($v * 255.0))}]
+    }
+    return $out
+}
+
+proc ::lumen::custom::rgb_hex { rgb } {
+    lassign $rgb r g b
+    foreach v {r g b} { set $v [expr {max(0, min(255, int(round([set $v]))))}] }
+    return [format "#%02X%02X%02X" $r $g $b]
+}
+
+proc ::lumen::custom::hex_rgb { hex } {
+    scan $hex "#%2x%2x%2x" r g b
+    return [list $r $g $b]
+}
+
+proc ::lumen::custom::hsl_hex { h s l } { return [rgb_hex [hsl_rgb $h $s $l]] }
+
+# top (rgb list) at alpha a over bottom (rgb list) -> rgb list.
+proc ::lumen::custom::over { top a bot } {
+    set out {}
+    foreach t $top b $bot { lappend out [expr {$t * $a + $b * (1.0 - $a)}] }
+    return $out
+}
+
+proc ::lumen::custom::_lin { c } {
+    set c [expr {$c / 255.0}]
+    return [expr {$c <= 0.03928 ? $c / 12.92 : pow(($c + 0.055) / 1.055, 2.4)}]
+}
+
+proc ::lumen::custom::luminance { rgb } {
+    lassign $rgb r g b
+    return [expr {0.2126 * [_lin $r] + 0.7152 * [_lin $g] + 0.0722 * [_lin $b]}]
+}
+
+proc ::lumen::custom::contrast { rgb1 rgb2 } {
+    set l1 [luminance $rgb1] ; set l2 [luminance $rgb2]
+    if { $l1 < $l2 } { lassign [list $l1 $l2] l2 l1 }
+    return [expr {($l1 + 0.05) / ($l2 + 0.05)}]
+}
+
+# Linear interpolation of two rgb lists.
+proc ::lumen::custom::mix { a b t } {
+    set out {}
+    foreach x $a y $b { lappend out [expr {$x + ($y - $x) * $t}] }
+    return $out
+}
+
+# The saved preferences, clamped; unknown or missing values take the
+# Lumen-dark defaults so a hand-edited settings file can never break the
+# derivation.
+proc ::lumen::custom::prefs {} {
+    set base dark ; set bh 222 ; set bs 32 ; set ah 34 ; set as 86
+    catch {
+        if { [info exists ::settings(lumen_custom_base)] && $::settings(lumen_custom_base) eq "light" } { set base light }
+        foreach {k lo hi} {bh 0 360 bs 0 70 ah 0 360 as 20 100} {
+            if { [info exists ::settings(lumen_custom_$k)] \
+              && [string is integer -strict [string trim $::settings(lumen_custom_$k)]] } {
+                set v [string trim $::settings(lumen_custom_$k)]
+                if { $v < $lo } { set v $lo } elseif { $v > $hi } { set v $hi }
+                set $k $v
+            }
+        }
+    }
+    return [dict create base $base bh $bh bs $bs ah $ah as $as]
+}
+
+# The whole palette from the five inputs. Returns a dict with every C()
+# token the skin uses (opaque hex, so canvas items can take them) plus the
+# generator's own parameters (gradient ends, glass alphas, shadow).
+#
+# Contrast guard: ink_3 (the 15-16 px labels) is pushed away from the glass
+# until it reads at >= 4.5:1, the accent until >= 3:1 -- the same floors
+# the 0.43.1 palette review used. Semantic colours (good / warn / danger)
+# and the four chart colours come from the matching baked theme and never
+# change: they carry meaning, not style.
+proc ::lumen::custom::palette { base bh bs ah as } {
+    set dark [expr {$base ne "light"}]
+    set P [dict create base $base]
+    if { $dark } {
+        set top [hsl_rgb $bh $bs 12] ; set bot [hsl_rgb $bh [expr {min(70, $bs + 4)}] 3]
+        set mid [mix $top $bot 0.5]
+        set white {255 255 255}
+        set glass_a 0.055 ; set raised_a 0.10 ; set brd_a 0.13 ; set spec_a 0.22
+        set brd_rgb $white ; set spec_rgb $white
+        set shadow_rgb {0 0 0} ; set shadow_a 0.60
+        set ink   [hsl_rgb $bh 30 96]
+        set ink2  [hsl_rgb $bh 20 75]
+        set ink3_l 60 ; set ink3_step 4 ; set ink3_max 84
+        set acc_l 59 ; set acc_step 4 ; set acc_max 78
+        set lo_rgb [hsl_rgb $ah [expr {$as * 0.6}] 20] ; set lo_a 0.35
+        set brdacc_rgb [hsl_rgb $ah $as 45] ; set brdacc_a 0.55
+        dict set P good "#2FD3A4" ; dict set P warn "#E8B34C" ; dict set P danger "#DA515E"
+        dict set P c_press "#17C29A" ; dict set P c_flow "#6C9BFF"
+        dict set P c_temp "#FF7880" ; dict set P c_weight "#E6C9A8" ; dict set P grid "#1C2129"
+    } else {
+        set top [hsl_rgb $bh [expr {min(70, $bs + 10)}] 97] ; set bot [hsl_rgb $bh $bs 87]
+        set mid [mix $top $bot 0.5]
+        set white {255 255 255}
+        set glass_a 0.60 ; set raised_a 0.85 ; set brd_a 0.14 ; set spec_a 0.70
+        set brd_rgb [hsl_rgb $bh 40 13] ; set spec_rgb $white
+        set shadow_rgb [hsl_rgb $bh 40 16] ; set shadow_a 0.18
+        set ink   [hsl_rgb $bh 30 11]
+        set ink2  [hsl_rgb $bh 16 35]
+        set ink3_l 47 ; set ink3_step -4 ; set ink3_max 30
+        set acc_l 44 ; set acc_step -4 ; set acc_max 28
+        set lo_rgb [hsl_rgb $ah $as 78] ; set lo_a 0.45
+        set brdacc_rgb [hsl_rgb $ah [expr {$as * 0.8}] 55] ; set brdacc_a 0.60
+        dict set P good "#12805F" ; dict set P warn "#B4761A" ; dict set P danger "#B23641"
+        dict set P c_press "#0E9E7C" ; dict set P c_flow "#3F72E0"
+        dict set P c_temp "#E04F5C" ; dict set P c_weight "#A8763F" ; dict set P grid "#D5DBE3"
+    }
+    set glass [over $white $glass_a $mid]
+    set raised [over $white $raised_a $mid]
+
+    # Tertiary ink: step away from the glass until the label floor holds.
+    set ink3 [hsl_rgb $bh 16 $ink3_l]
+    set l $ink3_l
+    while { [contrast $ink3 $glass] < 4.5 && ($ink3_step > 0 ? $l < $ink3_max : $l > $ink3_max) } {
+        set l [expr {$l + $ink3_step}]
+        set ink3 [hsl_rgb $bh 16 $l]
+    }
+    # Accent: the same, to 3:1 (large text and controls).
+    set acc [hsl_rgb $ah $as $acc_l]
+    set l $acc_l
+    while { [contrast $acc $glass] < 3.0 && ($acc_step > 0 ? $l < $acc_max : $l > $acc_max) } {
+        set l [expr {$l + $acc_step}]
+        set acc [hsl_rgb $ah $as $l]
+    }
+
+    dict set P bg        [rgb_hex $mid]
+    dict set P bg_top    [rgb_hex $top]
+    dict set P bg_bot    [rgb_hex $bot]
+    dict set P glass     [rgb_hex $glass]
+    dict set P glass_2   [rgb_hex $raised]
+    dict set P glass_brd [rgb_hex [over $brd_rgb $brd_a $mid]]
+    dict set P spec      [rgb_hex [over $spec_rgb $spec_a $mid]]
+    dict set P ink       [rgb_hex $ink]
+    dict set P ink_2     [rgb_hex $ink2]
+    dict set P ink_3     [rgb_hex $ink3]
+    dict set P crema     [rgb_hex $acc]
+    dict set P crema_lo  [rgb_hex [over $lo_rgb $lo_a $glass]]
+    dict set P crema_brd [rgb_hex [over $brdacc_rgb $brdacc_a $glass]]
+    # The chart widgets are opaque: match the panel at its centre height,
+    # 414 of 800 on home and 345 of 800 on the espresso page.
+    dict set P chart_bg      [rgb_hex [over $white $glass_a [mix $top $bot [expr {414 / 800.0}]]]]
+    dict set P chart_bg_flow [rgb_hex [over $white $glass_a [mix $top $bot [expr {345 / 800.0}]]]]
+
+    # Accent panels and pills: the baked tiles are the glass plus a faint
+    # accent wash -- barely warm on dark, a pale tint on light -- never
+    # the full-strength accent.
+    if { $dark } {
+        set accfill_rgb [mix $white $acc 0.5] ; set accfill_a 0.10
+    } else {
+        set accfill_rgb [mix $white [hsl_rgb $ah $as 78] 0.6] ; set accfill_a 0.72
+    }
+
+    # Generator parameters (rgb lists / alphas), consumed by bake.
+    dict set P gen [dict create top $top bot $bot white $white \
+        glass_a $glass_a raised_a $raised_a brd_rgb $brd_rgb brd_a $brd_a \
+        spec_rgb $spec_rgb spec_a $spec_a shadow_rgb $shadow_rgb shadow_a $shadow_a \
+        acc $acc lo_rgb $lo_rgb lo_a $lo_a brdacc_rgb $brdacc_rgb brdacc_a $brdacc_a \
+        accfill_rgb $accfill_rgb accfill_a $accfill_a \
+        bloom_rgb $acc bloom_a [expr {$dark ? 0.16 : 0.28}]]
+    return $P
+}
+
+# ---- the runtime baker ----------------------------------------------------
+
+proc ::lumen::custom::_png_chunk { type data } {
+    set td "$type$data"
+    return "[binary format I [string length $data]]$td[binary format I [zlib crc32 $td]]"
+}
+
+# rows: one binary string of 4*w bytes (RGBA, straight alpha) per row.
+proc ::lumen::custom::png_encode { w h rows } {
+    set raw ""
+    foreach r $rows { append raw "\x00" $r }
+    set ihdr [binary format IIccccc $w $h 8 6 0 0 0]
+    return "\x89PNG\r\n\x1a\n[_png_chunk IHDR $ihdr][_png_chunk IDAT [zlib compress $raw 6]][_png_chunk IEND {}]"
+}
+
+# Shadow falloff outside an edge. A blurred rectangle's shadow is at HALF
+# strength on the edge itself and fades to nothing over the blur radius,
+# so this is 0.5 at d = 0 decaying quadratically to 0 at S; inside it is
+# 1 (clipped away under the panel by _px anyway).
+proc ::lumen::custom::_fall { d S } {
+    if { $d <= 0.0 } { return 1.0 }
+    if { $d >= $S } { return 0.0 }
+    set t [expr {1.0 - $d / double($S)}]
+    return [expr {0.5 * $t * $t}]
+}
+
+# One RGBA pixel: the panel (coverage c from the rounded-rect distance d,
+# straight alpha fa / border / specular) composited over its shadow (alpha
+# sa). Returns a 4-byte binary string.
+proc ::lumen::custom::_px { c d cy fill fa brd ba spec spa shrgb sa } {
+    # The shadow lives OUTSIDE the panel only: under a translucent glass a
+    # shadow would darken the panel below its own backdrop, the opposite
+    # of the baked look where panels sit lighter than the ground.
+    set sa [expr {$sa * (1.0 - $c)}]
+    if { $c > 0.0 } {
+        if { $cy == 0 } {
+            set rgb $spec ; set a $spa
+        } elseif { $d > -1.0 } {
+            set rgb $brd ; set a $ba
+        } else {
+            set rgb $fill ; set a $fa
+        }
+        set ca [expr {$a * $c}]
+    } else {
+        set rgb {0 0 0} ; set ca 0.0
+    }
+    set oa [expr {$ca + $sa * (1.0 - $ca)}]
+    if { $oa <= 0.0 } { return [binary format cccc 0 0 0 0] }
+    set out {}
+    foreach t $rgb s $shrgb {
+        lappend out [expr {int(round(($t * $ca + $s * $sa * (1.0 - $ca)) / $oa))}]
+    }
+    lassign $out r g b
+    return [binary format cccc $r $g $b [expr {int(round($oa * 255.0))}]]
+}
+
+# A rounded panel of w x h physical px with corner radius rr, painted as a
+# PNG (w + 2S) x (h + 2S) with the shadow margin S around it (shadow offset
+# dy down). kind: plain | raised | accent. Only the margins and the corner
+# bands are evaluated per pixel; the straight middle of every row is one
+# run, so a full-width panel costs tens of thousands of evaluations, not
+# hundreds of thousands.
+proc ::lumen::custom::panel_png { P w h rr kind S dy } {
+    set G [dict get $P gen]
+    set white [dict get $G white]
+    set shrgb [dict get $G shadow_rgb] ; set sha [dict get $G shadow_a]
+    switch -exact -- $kind {
+        raised { set fill $white ; set fa [dict get $G raised_a]
+                 set brd [dict get $G brd_rgb] ; set ba [dict get $G brd_a] }
+        accent { set fill [dict get $G accfill_rgb] ; set fa [dict get $G accfill_a]
+                 set brd [dict get $G brdacc_rgb] ; set ba [dict get $G brdacc_a] }
+        default { set fill $white ; set fa [dict get $G glass_a]
+                  set brd [dict get $G brd_rgb] ; set ba [dict get $G brd_a] }
+    }
+    set spec [dict get $G spec_rgb] ; set spa [dict get $G spec_a]
+    if { $rr * 2 > $w } { set rr [expr {$w / 2}] }
+    if { $rr * 2 > $h } { set rr [expr {$h / 2}] }
+    set W [expr {$w + 2 * $S}] ; set H [expr {$h + 2 * $S}]
+    set hw [expr {$w / 2.0}] ; set hh [expr {$h / 2.0}]
+    set zone [expr {$S + $rr + 2}]           ;# per-pixel columns each side
+    set rows {}
+    set memo ""                              ;# the straight band's row
+    for { set y 0 } { $y < $H } { incr y } {
+        set cy [expr {$y - $S}]
+        set py [expr {$cy + 0.5 - $hh}]
+        set qy [expr {abs($py) - ($hh - $rr)}]
+        # shadow vertical factor: the shadow rect is the card shifted dy.
+        set sdy [expr {$cy < $dy ? $dy - $cy : ($cy >= $h + $dy ? $cy - ($h + $dy) + 1 : 0)}]
+        set fy [_fall $sdy $S]
+        set row ""
+        set inner_row [expr {$cy >= 0 && $cy < $h}]
+        # Every row between the corner bands with the shadow fully under
+        # it is identical: paint it once, reuse it.
+        set straight [expr {$inner_row && $cy > $rr && $cy < $h - $rr - 1 && $fy == 1.0}]
+        if { $straight && $memo ne "" } {
+            lappend rows $memo
+            continue
+        }
+        # The straight middle: constant across [zone, W - zone).
+        if { $inner_row && $cy > $rr && $cy < $h - $rr - 1 } {
+            set midc 1.0 ; set midd -2.0
+        } elseif { $inner_row } {
+            # Rows inside the corner band but between the corners are fully
+            # covered horizontally; the distance there is purely vertical.
+            set midc 1.0 ; set midd [expr {abs($py) - $hh}]
+        } else {
+            set midc 0.0 ; set midd 1.0
+        }
+        set midpx [_px $midc $midd $cy $fill $fa $brd $ba $spec $spa $shrgb [expr {$sha * $fy}]]
+        for { set x 0 } { $x < $W } { incr x } {
+            if { $x == $zone } {
+                append row [string repeat $midpx [expr {$W - 2 * $zone}]]
+                set x [expr {$W - $zone - 1}]
+                continue
+            }
+            set cx [expr {$x - $S}]
+            set px [expr {$cx + 0.5 - $hw}]
+            set qx [expr {abs($px) - ($hw - $rr)}]
+            set mx [expr {$qx > 0.0 ? $qx : 0.0}] ; set my [expr {$qy > 0.0 ? $qy : 0.0}]
+            set d [expr {sqrt($mx * $mx + $my * $my) + min(max($qx, $qy), 0.0) - $rr}]
+            set c [expr {0.5 - $d}]
+            if { $c > 1.0 } { set c 1.0 } elseif { $c < 0.0 } { set c 0.0 }
+            set sdx [expr {$cx < 0 ? -$cx : ($cx >= $w ? $cx - $w + 1 : 0)}]
+            set sa [expr {$sha * $fy * [_fall $sdx $S]}]
+            append row [_px $c $d $cy $fill $fa $brd $ba $spec $spa $shrgb $sa]
+        }
+        if { $straight } { set memo $row }
+        lappend rows $row
+    }
+    return [png_encode $W $H $rows]
+}
+
+# The soft glow behind a page's hero, at 1/4 scale (zoomed x4 on copy):
+# an ellipse whose alpha falls off smoothly to the rim.
+proc ::lumen::custom::bloom_png { P rx ry } {
+    set G [dict get $P gen]
+    lassign [dict get $G bloom_rgb] r g b
+    set a0 [dict get $G bloom_a]
+    set w [expr {int(2 * $rx)}] ; set h [expr {int(2 * $ry)}]
+    set rows {}
+    for { set y 0 } { $y < $h } { incr y } {
+        set row ""
+        set ny [expr {($y + 0.5 - $ry) / $ry}]
+        for { set x 0 } { $x < $w } { incr x } {
+            set nx [expr {($x + 0.5 - $rx) / $rx}]
+            set dd [expr {$nx * $nx + $ny * $ny}]
+            if { $dd >= 1.0 } {
+                append row [binary format cccc 0 0 0 0]
+            } else {
+                set t [expr {1.0 - $dd}]
+                append row [binary format cccc [expr {int($r)}] [expr {int($g)}] [expr {int($b)}] \
+                    [expr {int(round(255.0 * $a0 * $t * $t))}]]
+            }
+        }
+        lappend rows $row
+    }
+    return [png_encode $w $h $rows]
+}
+
+# Pastes src onto img at (tx, ty) with integer zoom z, cropping the source
+# so nothing lands outside img: a Tk photo `copy -to` refuses negative
+# coordinates and GROWS the destination past its right and bottom edges.
+proc ::lumen::custom::_paste { img src tx ty z } {
+    set sw [image width $src] ; set sh [image height $src]
+    set dw [image width $img] ; set dh [image height $img]
+    set fx 0 ; set fy 0
+    if { $tx < 0 } { set fx [expr {int(ceil(-$tx / double($z)))}] ; set tx [expr {$tx + $fx * $z}] }
+    if { $ty < 0 } { set fy [expr {int(ceil(-$ty / double($z)))}] ; set ty [expr {$ty + $fy * $z}] }
+    set fx2 [expr {min($sw, $fx + int(($dw - $tx) / $z))}]
+    set fy2 [expr {min($sh, $fy + int(($dh - $ty) / $z))}]
+    if { $fx2 <= $fx || $fy2 <= $fy } { return }
+    $img copy $src -from $fx $fy $fx2 $fy2 -to $tx $ty -zoom $z $z
+}
+
+# Draws ONE page background at W x H physical px into a Tk photo and
+# returns its name (caller deletes). Needs Tk.
+proc ::lumen::custom::page_photo { P spec W H } {
+    set G [dict get $P gen]
+    set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
+    set top [dict get $G top] ; set bot [dict get $G bot]
+
+    # Backdrop: a one-column photo, one put per row, zoomed to the width.
+    set col [image create photo]
+    for { set y 0 } { $y < $H } { incr y } {
+        set t [expr {$y / double($H - 1)}]
+        $col put [list [list [rgb_hex [mix $top $bot $t]]]] -to 0 $y
+    }
+    set img [image create photo -width $W -height $H]
+    $img copy $col -zoom $W 1
+    image delete $col
+
+    # Bloom, behind everything, quarter-scale then zoomed.
+    lassign [dict get $spec bloom] bcx bcy brx bry
+    set qrx [expr {int(round($brx * $sx / 4.0))}] ; set qry [expr {int(round($bry * $sy / 4.0))}]
+    if { $qrx > 2 && $qry > 2 } {
+        set bl [image create photo -data [bloom_png $P $qrx $qry]]
+        _paste $img $bl [expr {int(round($bcx * $sx)) - 4 * $qrx}] [expr {int(round($bcy * $sy)) - 4 * $qry}] 4
+        image delete $bl
+    }
+
+    # Panels then inner pills, each with its own shadow margin.
+    foreach {group S dy} [list panels [expr {int(round(30 * $sy))}] [expr {int(round(10 * $sy))}] \
+                               inner  [expr {int(round(8 * $sy))}]  [expr {int(round(3 * $sy))}]] {
+        foreach item [dict get $spec $group] {
+            lassign $item x y w h r kind
+            set pw [expr {int(round($w * $sx))}] ; set ph [expr {int(round($h * $sy))}]
+            set png [panel_png $P $pw $ph [expr {int(round($r * $sy))}] $kind $S $dy]
+            set pi [image create photo -data $png]
+            _paste $img $pi [expr {int(round($x * $sx)) - $S}] [expr {int(round($y * $sy)) - $S}] 1
+            image delete $pi
+        }
+    }
+    return $img
+}
+
+# Signature of what the custom files were drawn from.
+proc ::lumen::custom::signature { pr } {
+    return "1 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
+}
+
+# Makes sure lumen_*_custom.png exist for the screen and match the saved
+# colours; draws them when they do not. Returns 1 when every file is in
+# place, 0 when drawing was impossible (no Tk, write failed) -- the caller
+# then falls back to -bg_color pages. Runs at skin load, before any page
+# is declared, and only for the custom theme.
+proc ::lumen::custom::ensure_bake {} {
+    variable pages
+    if { [info commands image] eq "" } { return 0 }
+    set W 0 ; set H 0
+    catch { set W [expr {int([dui cget screen_size_width])}] ; set H [expr {int([dui cget screen_size_height])}] }
+    if { $W <= 0 || $H <= 0 } { catch { set W [winfo screenwidth .] ; set H [winfo screenheight .] } }
+    if { $W <= 0 || $H <= 0 } { return 0 }
+    set dir "[homedir]/skins/Lumen/${W}x${H}"
+    set pr [prefs]
+    set sig [signature $pr]
+    set sigfile "$dir/lumen_custom.sig"
+    set have 1
+    dict for {name spec} $pages {
+        if { ![file isfile "$dir/[dict get $spec out]_custom.png"] } { set have 0 }
+    }
+    set old ""
+    catch { set fh [open $sigfile r] ; set old [string trim [read $fh]] ; close $fh }
+    if { $have && $old eq $sig } { return 1 }
+
+    msg -INFO "Lumen: drawing custom theme backgrounds ($sig) at ${W}x${H}"
+    set t0 [clock milliseconds]
+    if { [catch {
+        file mkdir $dir
+        set P [palette [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]]
+        dict for {name spec} $pages {
+            set img [page_photo $P $spec $W $H]
+            set path "$dir/[dict get $spec out]_custom.png"
+            if { [catch { $img write $path -format png } werr] } {
+                # Some Img builds want the tkimg spelling.
+                $img write $path -format {png -alpha 1.0}
+            }
+            image delete $img
+        }
+        set fh [open $sigfile w] ; puts $fh $sig ; close $fh
+    } err] } {
+        msg -ERROR "Lumen: custom theme backgrounds failed: $err"
+        return 0
+    }
+    msg -INFO "Lumen: custom theme backgrounds drawn in [expr {[clock milliseconds] - $t0}] ms"
+    return 1
+}
+
+#############################################################################
 #  Boot
 #############################################################################
 
@@ -3718,12 +4263,28 @@ source "[homedir]/skins/default/standard_includes.tcl"
 
 set ::lumen::theme_mode "dark"
 catch {
-    if { [info exists ::settings(lumen_theme)] && $::settings(lumen_theme) ne "" } {
+    if { [info exists ::settings(lumen_theme)] && $::settings(lumen_theme) in {dark light custom} } {
         set ::lumen::theme_mode $::settings(lumen_theme)
     }
 }
 ::lumen::set_palette $::lumen::theme_mode
 ::lumen::_init_layout
+
+# 0.46.0: the custom theme draws its own page backgrounds on the tablet
+# (see ::lumen::custom::ensure_bake). When that is impossible the pages
+# are declared on a flat colour and the vector glass primitive draws the
+# panels instead -- the pre-0.20.0 look, never a blank screen.
+set ::lumen::_custom_baked 0
+if { $::lumen::theme_mode eq "custom" } {
+    if { [catch { set ::lumen::_custom_baked [::lumen::custom::ensure_bake] } err] } {
+        msg -ERROR "Lumen: custom theme bake threw: $err"
+        set ::lumen::_custom_baked 0
+    }
+    if { !$::lumen::_custom_baked } {
+        msg -NOTICE "Lumen: custom theme running on flat pages (no backgrounds drawn)"
+        set ::lumen::baked_pages [list]
+    }
+}
 
 # Every page uses a pre-rendered background. Tk canvas has no alpha and no
 # blur, so the frosted panels, their blurred backdrops, the soft shadows and
@@ -3746,13 +4307,28 @@ catch {
 # glass, which is why the settings and flow pages looked a generation behind.
 set ::lumen::pages [list espresso steam water hotwaterrinse]
 
-set ::lumen::_bg_suffix [expr {$::lumen::theme_mode eq "dark" ? "" : "_light"}]
+switch -exact -- $::lumen::theme_mode {
+    light   { set ::lumen::_bg_suffix "_light" }
+    custom  { set ::lumen::_bg_suffix "_custom" }
+    default { set ::lumen::_bg_suffix "" }
+}
 
-dui page add off           -bg_img "lumen_home$::lumen::_bg_suffix.png"
-dui page add lumen_settings -bg_img "lumen_settings$::lumen::_bg_suffix.png"
-dui page add espresso      -bg_img "lumen_flow_chart$::lumen::_bg_suffix.png"
-dui page add [list steam water hotwaterrinse] \
-                           -bg_img "lumen_flow$::lumen::_bg_suffix.png"
+# The five page declarations, either on their image or (custom theme with
+# no drawn backgrounds) on the flat page colour.
+proc ::lumen::_page_bg_args { img } {
+    if { $::lumen::theme_mode eq "custom" && !$::lumen::_custom_baked } {
+        return [list -bg_color $::lumen::C(bg)]
+    }
+    return [list -bg_img "$img$::lumen::_bg_suffix.png"]
+}
+
+dui page add off            {*}[::lumen::_page_bg_args lumen_home]
+dui page add lumen_settings {*}[::lumen::_page_bg_args lumen_settings]
+dui page add espresso       {*}[::lumen::_page_bg_args lumen_flow_chart]
+dui page add [list steam water hotwaterrinse] {*}[::lumen::_page_bg_args lumen_flow]
+# 0.46.0: the picker page is never baked -- it draws vector glass in the
+# CURRENT theme and a live preview of the pending one.
+dui page add lumen_theme -bg_color $::lumen::C(bg)
 
 # 0.44.0: the tank-empty page. standard_includes.tcl (sourced above)
 # declares `tankempty refill` on the default skin's cracked-earth
@@ -3766,7 +4342,7 @@ if { [catch { dui page delete [list tankempty refill] } err] } {
     msg -ERROR "Lumen: could not remove the stock tank-empty pages: $err"
 }
 if { [catch {
-    dui page add [list tankempty refill] -bg_img "lumen_message$::lumen::_bg_suffix.png"
+    dui page add [list tankempty refill] {*}[::lumen::_page_bg_args lumen_message]
 } err] } {
     msg -ERROR "Lumen: could not declare the tank-empty page: $err"
 }
@@ -4394,6 +4970,262 @@ proc ::lumen::build_message_page {} {
 }
 
 #############################################################################
+#  Custom theme picker page (0.46.0)
+#
+#  lumen_theme, reached from the THEME row's caption. Never baked: the
+#  rows are vector glass in the CURRENT theme, the PREVIEW column is
+#  redrawn from the PENDING colours on every tap (canvas items carry a
+#  role tag per palette token, and refresh_preview reconfigures them --
+#  the retheme recipe MaintenanceTracker uses). Done saves the five
+#  preferences and quits through the theme restart path; Cancel discards.
+#############################################################################
+
+# ---- the actions ----------------------------------------------------------
+
+proc ::lumen::act::open_theme_picker {} {
+    variable ::lumen::custom::pend
+    # Seed the pending state from what is saved, so the preview opens on
+    # the current custom colours (or the Lumen-dark defaults).
+    set pr [::lumen::custom::prefs]
+    foreach k {base bh bs ah as} { set pend($k) [dict get $pr $k] }
+    if { [catch { dui page load lumen_theme } err] } {
+        msg -ERROR "Lumen: could not open the theme picker: $err"
+        return
+    }
+    ::lumen::refresh_preview
+}
+
+proc ::lumen::act::theme_pick { key value } {
+    variable ::lumen::custom::pend
+    set pend($key) $value
+    ::lumen::refresh_preview
+}
+
+proc ::lumen::act::theme_preset { i } {
+    variable ::lumen::custom::pend
+    variable ::lumen::custom::presets
+    set p [lrange $presets [expr {$i * 6}] [expr {$i * 6 + 5}]]
+    if { [llength $p] != 6 } { return }
+    lassign $p - pend(base) pend(bh) pend(bs) pend(ah) pend(as)
+    ::lumen::refresh_preview
+}
+
+proc ::lumen::act::theme_cancel {} {
+    if { [catch { dui page load lumen_settings } err] } {
+        msg -ERROR "Lumen: could not leave the theme picker: $err"
+    }
+}
+
+# Done: persist the five preferences plus lumen_theme=custom, then apply
+# the way every theme change applies -- the app closes and is reopened.
+# Nothing to apply (already custom with the same colours) just goes back.
+proc ::lumen::act::theme_apply {} {
+    variable ::lumen::custom::pend
+    set before [::lumen::custom::signature [::lumen::custom::prefs]]
+    if { [catch {
+        set ::settings(lumen_custom_base) $pend(base)
+        foreach k {bh bs ah as} { set ::settings(lumen_custom_$k) $pend($k) }
+        set ::settings(lumen_theme) custom
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the custom theme: $err"
+        return
+    }
+    set after [::lumen::custom::signature [::lumen::custom::prefs]]
+    if { $::lumen::theme_mode eq "custom" && $before eq $after } {
+        theme_cancel
+        return
+    }
+    set ::lumen::pending_theme custom
+    ::lumen::act::restart_for_theme
+}
+
+# ---- the page ------------------------------------------------------------
+
+# Reconfigures every preview item from the pending colours. Items carry
+# tags lumen_thp_<token> (fill) and lumen_tho_<token> (outline); the
+# selection rings on the base pills, swatches and presets follow the
+# pending state too.
+proc ::lumen::refresh_preview {} {
+    variable C
+    variable ::lumen::custom::pend
+    variable ::lumen::custom::hues
+    variable ::lumen::custom::presets
+    if { [catch {
+        set P [::lumen::custom::palette $pend(base) $pend(bh) $pend(bs) $pend(ah) $pend(as)]
+        set can [dui canvas]
+        foreach tok {glass glass_2 glass_brd ink ink_2 ink_3 crema crema_lo crema_brd good} {
+            set v [dict get $P $tok]
+            $can itemconfigure lumen_thp_$tok -fill $v
+            $can itemconfigure lumen_tho_$tok -outline $v
+        }
+        # Base pills: the selected one takes the accent look.
+        foreach b {dark light} {
+            set on [expr {$pend(base) eq $b}]
+            $can itemconfigure lumen_thb_$b -fill [expr {$on ? $C(crema_lo) : $C(glass_2)}] \
+                -outline [expr {$on ? $C(crema_brd) : $C(glass_brd)}]
+            $can itemconfigure lumen_thbt_$b -fill [expr {$on ? $C(crema) : $C(ink_2)}]
+        }
+        foreach key {bh ah} {
+            foreach h $hues {
+                set on [expr {$pend($key) == $h}]
+                $can itemconfigure lumen_ths_${key}_$h \
+                    -outline [expr {$on ? $C(ink) : $C(glass_brd)}] -width [expr {$on ? 6 : 2}]
+            }
+        }
+        for { set i 0 } { $i < [llength $presets] / 6 } { incr i } {
+            lassign [lrange $presets [expr {$i * 6 + 1}] [expr {$i * 6 + 5}]] pb ph ps pa pas
+            set on [expr {$pend(base) eq $pb && $pend(bh) == $ph && $pend(bs) == $ps \
+                          && $pend(ah) == $pa && $pend(as) == $pas}]
+            $can itemconfigure lumen_thpr_$i \
+                -outline [expr {$on ? $C(ink) : $C(glass_brd)}] -width [expr {$on ? 6 : 2}]
+        }
+    } err] } {
+        msg -ERROR "Lumen: theme preview refresh failed: $err"
+    }
+}
+
+proc ::lumen::build_theme_page {} {
+    variable C
+    variable L
+    variable ::lumen::custom::hues
+    variable ::lumen::custom::presets
+    set p "lumen_theme"
+    set n 0     ;# unique first tag per item (dui refuses duplicates)
+
+    txt $p $L(center_x) 24 [translate "Custom theme"] \
+        -font $L(font_title) -fill $C(ink) -anchor n -justify center
+    var $p $L(center_x) 72 {[::lumen::data::version_line]} \
+        -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
+
+    lassign $L(set_rows) ry1 ry2 ry3 ry4
+    set lx $L(set_col_l) ; set lw $L(set_col_l_w)
+    set rx $L(set_col_r) ; set rw $L(set_col_r_w)
+
+    # ---- BASE ----
+    glass $p $lx $ry1 $lw $L(set_row_h)
+    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry1 + 26}] [translate "BASE"] -font $L(font_label) -fill $C(ink_3)
+    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry1 + 56}] [translate "Dark glass or pale glass."] \
+        -font $L(font_caption) -fill $C(ink_2)
+    foreach {b bx bw lbl} [list dark 402 100 "Dark" light 510 96 "Light"] {
+        set by [expr {$ry1 + 35}]
+        rounded_rect $p [X $bx] [Y $by] [X [expr {$bx + $bw}]] [Y [expr {$by + 48}]] [X 32] \
+            -fill $C(glass_2) -outline $C(glass_brd) -width 2 -tags [list lumen_thi_[incr n] lumen_thb_$b]
+        dui add dtext $p [X [expr {$bx + $bw / 2.0}]] [Y [expr {$by + 24}]] -text [translate $lbl] \
+            -font $L(font_button) -fill $C(ink_2) -anchor center -justify center \
+            -tags [list lumen_thi_[incr n] lumen_thbt_$b]
+        tap $p $bx $by $bw 48 "::lumen::act::theme_pick base $b" "Base $lbl"
+    }
+
+    # ---- BACKDROP and ACCENT swatch rows ----
+    foreach {key ry title cap} [list \
+        bh $ry2 "BACKDROP" "The tint the page and its glass are built on." \
+        ah $ry3 "ACCENT"   "Replaces crema: hero number, buttons, links."] {
+        glass $p $lx $ry $lw $L(set_row_h)
+        txt $p [expr {$lx + $L(pad_x)}] [expr {$ry + 26}] [translate $title] -font $L(font_label) -fill $C(ink_3)
+        txt $p [expr {$lx + $L(pad_x)}] [expr {$ry + 56}] [translate $cap] \
+            -font $L(font_caption) -fill $C(ink_2) -width 150
+        set i 0
+        foreach h $hues {
+            set sx [expr {352 + ($i % 6) * 46}]
+            set sy [expr {$ry + 16 + ($i >= 6 ? 52 : 0)}]
+            set fill [expr {$key eq "bh" ? [::lumen::custom::hsl_hex $h 45 45] : [::lumen::custom::hsl_hex $h 85 58]}]
+            dui add canvas_item oval $p [X $sx] [Y $sy] [X [expr {$sx + 44}]] [Y [expr {$sy + 44}]] \
+                -fill $fill -outline $C(glass_brd) -width 2 \
+                -tags [list lumen_thi_[incr n] lumen_ths_${key}_$h]
+            tap $p $sx $sy 44 44 "::lumen::act::theme_pick $key $h" "Hue $h"
+            incr i
+        }
+    }
+
+    # ---- PRESETS ----
+    glass $p $lx $ry4 $lw $L(set_row_h)
+    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry4 + 26}] [translate "PRESETS"] -font $L(font_label) -fill $C(ink_3)
+    for { set i 0 } { $i < [llength $presets] / 6 } { incr i } {
+        lassign [lrange $presets [expr {$i * 6}] [expr {$i * 6 + 5}]] name pb ph ps pa pas
+        set PP [::lumen::custom::palette $pb $ph $ps $pa $pas]
+        set px [expr {302 + ($i % 3) * 112}]
+        set py [expr {$ry4 + 16 + ($i / 3) * 52}]
+        rounded_rect $p [X $px] [Y $py] [X [expr {$px + 104}]] [Y [expr {$py + 44}]] [X 24] \
+            -fill [dict get $PP bg] -outline $C(glass_brd) -width 2 \
+            -tags [list lumen_thi_[incr n] lumen_thpr_$i]
+        dui add dtext $p [X [expr {$px + 52}]] [Y [expr {$py + 22}]] -text [translate $name] \
+            -font $L(font_label) -fill [dict get $PP crema] -anchor center -justify center \
+            -tags [list lumen_thi_[incr n]]
+        tap $p $px $py 104 44 "::lumen::act::theme_preset $i" $name
+    }
+
+    # ---- PREVIEW column: every item tagged by the token it shows ----
+    set pv_y $ry1 ; set pv_h [expr {$ry4 + $L(set_row_h) - $ry1}]
+    rounded_rect $p [X $rx] [Y $pv_y] [X [expr {$rx + $rw}]] [Y [expr {$pv_y + $pv_h}]] [X 52] \
+        -fill $C(glass) -outline $C(glass_brd) -width 2 \
+        -tags [list lumen_thi_[incr n] lumen_thp_glass lumen_tho_glass_brd]
+    dui add dtext $p [X [expr {$rx + $L(pad_x)}]] [Y [expr {$pv_y + 26}]] -text [translate "PREVIEW"] \
+        -font $L(font_label) -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+
+    # mini grind card
+    set gx 694 ; set gy 166 ; set gw 452 ; set gh 150
+    rounded_rect $p [X $gx] [Y $gy] [X [expr {$gx + $gw}]] [Y [expr {$gy + $gh}]] [X 40] \
+        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
+        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
+    dui add dtext $p [X 712] [Y 184] -text [translate "RECOMMENDED GRIND"] -font $L(font_label) \
+        -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    rounded_rect $p [X 978] [Y 182] [X 1128] [Y 208] [X 26] \
+        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
+        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
+    dui add dtext $p [X 1053] [Y 195] -text [translate "Regression"] -font $L(font_label) \
+        -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
+    dui add dtext $p [X 920] [Y 214] -text "2.1" -font $L(font_metric) -fill $C(crema) \
+        -anchor n -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
+    dui add dtext $p [X 712] [Y 288] -text "[translate Good]  -  11 [translate shots]" \
+        -font $L(font_caption) -fill $C(good) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_good]
+    dui add dtext $p [X 1130] [Y 288] -text [translate "Shot analysis"] -font $L(font_caption) \
+        -fill $C(crema) -anchor ne -justify right -tags [list lumen_thi_[incr n] lumen_thp_crema]
+
+    # mini next-shot strip
+    set sx 694 ; set sy 332 ; set sw 452 ; set sh 120
+    rounded_rect $p [X $sx] [Y $sy] [X [expr {$sx + $sw}]] [Y [expr {$sy + $sh}]] [X 40] \
+        -fill $C(glass_2) -outline $C(glass_brd) -width 2 \
+        -tags [list lumen_thi_[incr n] lumen_thp_glass_2 lumen_tho_glass_brd]
+    dui add dtext $p [X 712] [Y 350] -text [translate "NEXT SHOT"] -font $L(font_label) \
+        -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    dui add dtext $p [X 712] [Y 374] -text "Las Brumas" -font $L(font_primary) \
+        -fill $C(ink) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink]
+    foreach {bx glyph} {712 - 864 +} {
+        rounded_rect $p [X $bx] [Y 392] [X [expr {$bx + 44}]] [Y 440] [X 32] \
+            -fill $C(glass) -outline $C(glass_brd) -width 2 \
+            -tags [list lumen_thi_[incr n] lumen_thp_glass lumen_tho_glass_brd]
+        dui add dtext $p [X [expr {$bx + 22}]] [Y [expr {416 + ($glyph eq "-" ? $L(step_minus_dy) : 0)}]] \
+            -text $glyph -font $L(font_section) -fill $C(crema) -anchor center -justify center \
+            -tags [list lumen_thi_[incr n] lumen_thp_crema]
+    }
+    dui add dtext $p [X 810] [Y 416] -text "2.1" -font $L(font_data) -fill $C(ink) \
+        -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_ink]
+    rounded_rect $p [X 940] [Y 392] [X 1126] [Y 440] [X 32] \
+        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
+        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
+    dui add dtext $p [X 1033] [Y 416] -text [translate "Set dose"] -font $L(font_button) \
+        -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
+
+    dui add dtext $p [X 694] [Y 470] -width [X 452] -anchor nw -justify left \
+        -text [translate "Tap Done: the app closes; reopen it and every page is drawn in these colours."] \
+        -font $L(font_caption) -fill $C(ink_2) -tags [list lumen_thi_[incr n] lumen_thp_ink_2]
+    dui add dtext $p [X 694] [Y 540] -width [X 452] -anchor nw -justify left \
+        -text [translate "Contrast is guarded: labels and the accent always stay readable on the glass."] \
+        -font $L(font_caption) -fill $C(ink_3) -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+
+    # ---- Cancel / Done ----
+    txt $p 194 716 [translate "Cancel"] -font $L(font_button) -fill $C(crema)
+    tap $p 170 700 120 56 {::lumen::act::theme_cancel} "Cancel" label
+    set dw $L(set_done_w) ; set dh $L(set_done_h)
+    set dx [expr {$L(center_x) - $dw / 2}] ; set dy $L(set_done_y)
+    glass $p $dx $dy $dw $dh -radius $L(radius_sm) -fill $C(crema_lo) -outline $C(crema_brd)
+    txt $p [expr {$dx + $dw / 2.0}] [expr {$dy + $dh / 2.0}] [translate "Done"] \
+        -font $L(font_button) -fill $C(crema) -anchor center -justify center
+    tap $p $dx $dy $dw $dh {::lumen::act::theme_apply} "Done"
+}
+
+#############################################################################
 #  Lumen settings page
 #
 #  Reached from the rail's Settings button. Lumen's own preferences live
@@ -4574,6 +5406,10 @@ proc ::lumen::build_settings {} {
     var $p [expr {$rx + $L(pad_x)}] [expr {$ry1 + 56}] \
         {[::lumen::data::theme_note]} \
         -font $L(font_caption) -fill $C(ink_2) -width 290
+    # 0.46.0: the caption opens the colour picker. Its zone ends at 984,
+    # clear of the button zone starting at 996.
+    tap $p [expr {$rx + $L(pad_x)}] [expr {$ry1 + 50}] 290 52 \
+        {::lumen::act::open_theme_picker} "Custom colours" label
     set bx [expr {$rx + $rw - $L(pad_x) - $bw}]
     set by [expr {$ry1 + ($L(set_row_h) - $bh) / 2}]
     glass $p $bx $by $bw $bh -radius $L(radius_sm) -fill $C(glass_2)
@@ -4686,6 +5522,7 @@ proc ::lumen::build_settings {} {
 ::lumen::build_home
 ::lumen::build_settings
 ::lumen::build_message_page
+::lumen::build_theme_page
 
 # Each page gets ITS OWN timer. Sharing espresso_secs across all of them
 # reported time-since-the-last-espresso on the water and flush pages -- see

@@ -8,7 +8,16 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.45.0 — every page built, baked and running on the tablet.**
+**Version 0.46.0 — every page built, baked and running on the tablet.**
+
+New in 0.46.0: a **Custom theme**. Beside Dark and Light, the THEME row
+now cycles to Custom, and its caption opens a picker where you choose a
+base (dark or pale glass), a **backdrop** tint and an **accent** colour
+from twelve swatches each, or one of six presets. A preview card repaints
+on every tap. Tap Done and the app closes; reopen it and every page is
+drawn in your colours — the backgrounds are painted on the tablet itself
+the first time, so nothing is baked ahead of time. Labels and the accent
+are guarded for contrast whatever you pick.
 
 New in 0.45.0: a **LOW WATER** row on the Lumen settings page sets the
 tank level under which the taskbar's water reading turns amber (100 to
@@ -230,8 +239,22 @@ will sit off its panel.
 
 ## Themes
 
-Dark and light are both defined. The mode is read once at load from
-`::settings(lumen_theme)` (`dark` or `light`); it defaults to dark.
+Dark, light and custom. The mode is read once at load from
+`::settings(lumen_theme)` (`dark`, `light` or `custom`); it defaults to
+dark.
+
+**Custom** (0.46.0) derives a whole palette from five saved values: the
+base (dark or light glass), the backdrop hue and tint strength, and the
+accent hue and saturation. Backdrop drives the page gradient, the glass
+(translucent white over it, so it inherits the tint) and the three inks;
+accent replaces crema everywhere. Good/warn/danger and the chart colours
+never change. The page backgrounds cannot be pre-rendered for arbitrary
+colours, so at the first launch after a change the skin paints them in
+pure Tcl — the gradient, every panel and pill with a soft shadow, the
+bloom — and writes `lumen_<page>_custom.png` next to the baked images,
+with a `lumen_custom.sig` stamp so unchanged colours draw nothing. If
+painting fails, the pages fall back to flat colour with vector panels.
+Grind Advisor's glass popup stays opaque under Custom.
 
 Switching the theme closes the app; reopen it from the launcher (it cannot
 restart itself, see below).
@@ -340,7 +363,11 @@ clamps its value. Three groups:
 
 * **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
   depth), `lumen_time_format` / `lumen_date_format` (taskbar clock),
-  `lumen_water_low_ml` (amber threshold, 100–800).
+  `lumen_water_low_ml` (amber threshold, 100–800), and the custom theme's
+  `lumen_custom_base` / `_bh` / `_bs` / `_ah` / `_as` (picker Done only).
+* **Files:** the custom theme writes `lumen_<page>_custom.png` and
+  `lumen_custom.sig` into `skins/Lumen/<width>x<height>/` — its own
+  folder, nothing else.
   Since 0.36.0 the chart is always smooth with stage lines shown —
   `live_graph_smoothing_technique` and `lumen_chart_stages` are no
   longer read or written.
