@@ -5182,35 +5182,36 @@ proc ::lumen::build_theme_page {} {
     dui add dtext $p [X 1130] [Y 288] -text [translate "Shot analysis"] -font $L(font_caption) \
         -fill $C(crema) -anchor ne -justify right -tags [list lumen_thi_[incr n] lumen_thp_crema]
 
-    # mini next-shot strip
-    set sx 694 ; set sy 332 ; set sw 452 ; set sh 120
+    # mini next-shot strip (332..468: label 348, name 370->394, pills
+    # 406..454 -- the first tablet screenshot had the name over the pills)
+    set sx 694 ; set sy 332 ; set sw 452 ; set sh 136
     rounded_rect $p [X $sx] [Y $sy] [X [expr {$sx + $sw}]] [Y [expr {$sy + $sh}]] [X 40] \
         -fill $C(glass_2) -outline $C(glass_brd) -width 2 \
         -tags [list lumen_thi_[incr n] lumen_thp_glass_2 lumen_tho_glass_brd]
-    dui add dtext $p [X 712] [Y 350] -text [translate "NEXT SHOT"] -font $L(font_label) \
+    dui add dtext $p [X 712] [Y 348] -text [translate "NEXT SHOT"] -font $L(font_label) \
         -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
-    dui add dtext $p [X 712] [Y 374] -text "Las Brumas" -font $L(font_primary) \
+    dui add dtext $p [X 712] [Y 370] -text "Las Brumas" -font $L(font_primary) \
         -fill $C(ink) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink]
     foreach {bx glyph} {712 - 864 +} {
-        rounded_rect $p [X $bx] [Y 392] [X [expr {$bx + 44}]] [Y 440] [X 32] \
+        rounded_rect $p [X $bx] [Y 406] [X [expr {$bx + 44}]] [Y 454] [X 32] \
             -fill $C(glass) -outline $C(glass_brd) -width 2 \
             -tags [list lumen_thi_[incr n] lumen_thp_glass lumen_tho_glass_brd]
-        dui add dtext $p [X [expr {$bx + 22}]] [Y [expr {416 + ($glyph eq "-" ? $L(step_minus_dy) : 0)}]] \
+        dui add dtext $p [X [expr {$bx + 22}]] [Y [expr {430 + ($glyph eq "-" ? $L(step_minus_dy) : 0)}]] \
             -text $glyph -font $L(font_section) -fill $C(crema) -anchor center -justify center \
             -tags [list lumen_thi_[incr n] lumen_thp_crema]
     }
-    dui add dtext $p [X 810] [Y 416] -text "2.1" -font $L(font_data) -fill $C(ink) \
+    dui add dtext $p [X 810] [Y 430] -text "2.1" -font $L(font_data) -fill $C(ink) \
         -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_ink]
-    rounded_rect $p [X 940] [Y 392] [X 1126] [Y 440] [X 32] \
+    rounded_rect $p [X 940] [Y 406] [X 1126] [Y 454] [X 32] \
         -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
         -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
-    dui add dtext $p [X 1033] [Y 416] -text [translate "Set dose"] -font $L(font_button) \
+    dui add dtext $p [X 1033] [Y 430] -text [translate "Set dose"] -font $L(font_button) \
         -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
 
-    dui add dtext $p [X 694] [Y 470] -width [X 452] -anchor nw -justify left \
+    dui add dtext $p [X 694] [Y 486] -width [X 452] -anchor nw -justify left \
         -text [translate "Tap Done: the app closes; reopen it and every page is drawn in these colours."] \
         -font $L(font_caption) -fill $C(ink_2) -tags [list lumen_thi_[incr n] lumen_thp_ink_2]
-    dui add dtext $p [X 694] [Y 540] -width [X 452] -anchor nw -justify left \
+    dui add dtext $p [X 694] [Y 550] -width [X 452] -anchor nw -justify left \
         -text [translate "Contrast is guarded: labels and the accent always stay readable on the glass."] \
         -font $L(font_caption) -fill $C(ink_3) -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
 

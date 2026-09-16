@@ -4,9 +4,10 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.46.0 - Custom theme: your own backdrop and accent, drawn on the tablet
+## 0.46.0 - Custom theme: your own backdrop and accent, drawn on the tablet - TABLET-VERIFIED 2026-09-16 (picker opened from the THEME caption, Sea glass preset, Done, relaunch: the five backgrounds drew in 5.6 s, home + settings rendered in the custom palette, chart flush with its panel; cycled back to dark via THEME + Done)
 
-Base: 0.45.0. **Safety status: TWO new write capabilities, both confined to
+Base: 0.45.0. Tablet lesson: the first picker screenshot showed the preview's
+bean name over its stepper pills; the mini strip grew to 136 px. **Safety status: TWO new write capabilities, both confined to
 Lumen's own data. (1) Five preferences `lumen_custom_base|bh|bs|ah|as`
 plus `lumen_theme=custom`, written only by the picker page's Done through
 `save_settings`. (2) Five PNG files `lumen_<page>_custom.png` and a
