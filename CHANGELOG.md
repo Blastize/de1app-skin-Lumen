@@ -4,6 +4,19 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.50.1 - fix: a light-base custom set hung the bake (app stuck on "Applying", then at startup) - TABLET-VERIFIED 2026-09-16 22:25 (rescue build pushed over the stuck app; restart drew the Sea glass set in 12.5 s and loaded)
+
+Base: 0.50.0. Owner report: applying Sea glass stuck on the wait pill; after
+a kill the app hung at startup (the same bake runs at skin load).
+**Safety status: unchanged.** Cause: 0.49.0's soft-edge painter clamps the
+per-pixel column count to half the PNG width for a panel too narrow for a
+middle stretch; that put the row shortcut's "x == zone" exactly where its
+jump-back landed, so the row loop never advanced. Only a LIGHT base
+(blur 20) on the 44 px inner pills reaches it; dark bases (blur 16) do
+not, which is why Graphite and Espresso were fine. Now a narrow panel is
+painted per pixel end to end. Harness: every inner-pill size of the light
+Sea glass set must paint and return.
+
 ## 0.50.0 - a wait pill counts the theme apply off - TABLET-VERIFIED 2026-09-16 20:10 (captures taken DURING the apply: "Applying Dark: colours and backgrounds...", "DYE pages 4 / 10...", "10 / 10..."; the pill changes to the new palette with the page; gone after; a stale press-flash chip seen on the THEME button mid-apply in the first run is now cleared when the pill appears; cycle custom -> dark -> light -> custom 4.5-4.9 s each, 0 problems, no errors)
 
 Base: 0.49.0. Owner report: cycling the themes "freezes the screen for a

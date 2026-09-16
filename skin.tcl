@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.50.0  (wait pill with step progress while a theme applies; see `variable version`)
+#  Version: 0.50.1  (fix: light-base custom bake hung on narrow pills; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.50.0"
+    variable version "0.50.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -4298,7 +4298,12 @@ proc ::lumen::custom::panel_png { P w h rr kind S dy {flat 0} {soft 0} } {
     set hw [expr {$w / 2.0}] ; set hh [expr {$h / 2.0}]
     set edge [expr {max($rr, $soft)}]
     set zone [expr {$S + $edge + 2}]         ;# per-pixel columns each side
-    if { 2 * $zone >= $W } { set zone [expr {$W / 2}] }
+    # 0.50.1: a panel too narrow for a middle stretch is painted per pixel
+    # end to end. Clamping `zone` to W/2 (as before) put the shortcut's
+    # "x == zone" exactly where its "set x W - zone - 1" jumped back to,
+    # and the row loop never advanced: the Sea glass set (light base,
+    # blur 20, 44 px pills) hung the bake at skin load -- owner report.
+    if { 2 * $zone >= $W } { set zone -1 }
     set span [expr {$flat ? 0 : int($h * 0.85)}]
     set rows {}
     array set memo {}
@@ -4525,10 +4530,27 @@ proc ::lumen::custom::ensure_bake {} {
     catch { set fh [open $sigfile r] ; set old [string trim [read $fh]] ; close $fh }
     if { $have && $old eq $sig } { return 1 }
 
+    # 0.50.1 safety net: a bake that never returns (the Sea glass hang)
+    # locks the app at every start, because the same bake runs at skin
+    # load. So a marker is written before painting and removed after; a
+    # marker found here means the last attempt died mid-way, and this
+    # set is refused -- flat pages, a usable app, and a log line -- until
+    # the colours change or the marker is cleared by hand.
+    set marker "$dir/lumen_custom.baking"
+    if { [file exists $marker] } {
+        set was ""
+        catch { set fh [open $marker r] ; set was [string trim [read $fh]] ; close $fh }
+        file delete -force $marker
+        if { $was eq $sig } {
+            msg -ERROR "Lumen: the last bake of this custom set ($sig) never finished; not trying it again at load"
+            return 0
+        }
+    }
     msg -INFO "Lumen: drawing custom theme backgrounds ($sig) at ${W}x${H}"
     set t0 [clock milliseconds]
     if { [catch {
         file mkdir $dir
+        set fh [open $marker w] ; puts $fh $sig ; close $fh
         set P [palette [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]]
         dict for {name spec} $pages {
             set img [page_photo $P $spec $W $H]
@@ -4540,6 +4562,7 @@ proc ::lumen::custom::ensure_bake {} {
             image delete $img
         }
         set fh [open $sigfile w] ; puts $fh $sig ; close $fh
+        file delete -force $marker
     } err] } {
         msg -ERROR "Lumen: custom theme backgrounds failed: $err"
         return 0
