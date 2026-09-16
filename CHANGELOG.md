@@ -4,7 +4,7 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
-## 0.46.1 - the custom painter matches the bake; photo panels on the picker
+## 0.46.1 - the custom painter matches the bake; photo panels on the picker - TABLET-VERIFIED 2026-09-16 (owner's Espresso preset redrawn at launch in 7.0 s: home, settings and the picker's photo panels all soft-shadowed, no strips, no seams; theme left as the owner set it)
 
 Base: 0.46.0. **Safety status: unchanged (same files, same prefs; the
 signature's painter number is 2, so existing custom PNGs are redrawn once).**
