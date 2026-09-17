@@ -8,7 +8,15 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.51.0 — every page built, baked and running on the tablet.**
+**Version 0.52.0 — every page built, baked and running on the tablet.**
+
+New in 0.52.0: **truer custom accents.** The accent colour is now kept
+readable on the tinted card it actually sits on (the hero number, Done,
+Steam and Water), not only on plain glass; on light bases that lifts a
+few combinations that used to wash out. The white / black accent swatch
+now really gives white on a dark base and near-black on a light one,
+and survives being saved. Existing custom sets are redrawn once at the
+next start.
 
 New in 0.51.0: **a roomier colour picker with 52 swatches and a true
 preview.** Backdrop and accent each offer two rows of thirteen: a neutral

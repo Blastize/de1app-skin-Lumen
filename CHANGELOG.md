@@ -4,6 +4,31 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.52.0 - custom palette: the accent clears 3:1 on its own wash too; the neutral swatch gives a white / black accent and survives a save - TABLET-VERIFIED 2026-09-17 22:48 (restart re-baked the owner's taupe/neutral set as sig `4 dark 30 22 0 0`, 7 files, no marker; home shows the hero, Curve / Shot analysis and Done in #E0E0E0 instead of the pink #AB8282; the picker reopened with BOTH saved swatches ringed and the Accent chip #E0E0E0; a Sea glass tap previewed #157960 on wash #A2D4CB, then Cancel; no Lumen errors)
+
+Base: 0.51.0. A review swept all 1352 swatch pairs through the palette
+maths: the accent was guarded against the plain glass only, while the hero
+number, Done and the Steam / Water buttons draw it on the accent WASH
+(`crema_lo`), a mid tone on a light base - 479 of 676 light pairs fell
+under 3:1 there (2.13 worst; the Lumen light and Sea glass presets 2.59).
+And the "white" accent swatch came out mid grey (#969696 / #707070), then
+a saved neutral was clamped from saturation 0 to 20, so it applied as a
+tinted grey (the owner's taupe set showed a pink #AB8282 accent).
+**Safety status: unchanged. Same five prefs, same files.** The painter
+signature is 3 -> 4, so every custom set is redrawn ONCE at the next
+start (about 12 s behind the wait pill).
+
+- `palette`: the accent loop stops only when it clears 3.06:1 on the glass
+  AND on its wash (the dark wash is re-derived per step); saturation 0
+  starts at lightness 88 (dark) / 25 (light) -> #E0E0E0 / #404040.
+- `prefs`: accent saturation clamps to 0..100 (was 20..100).
+- Harness: the 1352-pair sweep asserts wash >= 3:1 (now 3.05 worst) and the
+  neutral tones; clamp test updated; signature 4.
+- Presets move slightly on light: Lumen light accent #A26516 -> #905A14,
+  Sea glass #188B6E -> #157960. Dark presets unchanged.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.51.0 - picker redesign: 52 swatches incl. neutral and brown, a roomy grid, a painted miniature; the wait pill fits its text - TABLET-VERIFIED 2026-09-17 22:11 (picker eyeballed over the owner's rose/violet light set: grids breathe, neutral + brown + rich + vivid taps set both values and ring the swatch, the miniature repaints in 220 ms per tap and tracks the gradient, bloom and panels; first capture showed both captions and two preset labels overrunning and the miniature's band on the card edge, all three fixed in the same pass; a forced re-bake showed "Applying Custom: drawing backgrounds..." inside a pill sized to it; whole custom apply with bake 17.9 s, 0 problems; owner's set restored, no marker left)
 
 Base: 0.50.1. Owner review of the picker: swatches too close and mashed,

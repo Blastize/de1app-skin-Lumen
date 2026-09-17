@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.51.0  (picker redesign: swatch pairs, roomy grid, painted miniature; wait pill sized to its text; see `variable version`)
+#  Version: 0.52.0  (custom palette: accent guarded against its wash fill, neutral accent near white / black, saturation 0 saved; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.51.0"
+    variable version "0.52.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -4156,7 +4156,9 @@ proc ::lumen::custom::prefs {} {
     set base dark ; set bh 222 ; set bs 32 ; set ah 34 ; set as 86
     catch {
         if { [info exists ::settings(lumen_custom_base)] && $::settings(lumen_custom_base) eq "light" } { set base light }
-        foreach {k lo hi} {bh 0 360 bs 0 70 ah 0 360 as 20 100} {
+        # 0.52.0: accent saturation may be 0 (the neutral swatch); the old
+        # floor of 20 turned a saved white / black accent into a tinted grey.
+        foreach {k lo hi} {bh 0 360 bs 0 70 ah 0 360 as 0 100} {
             if { [info exists ::settings(lumen_custom_$k)] \
               && [string is integer -strict [string trim $::settings(lumen_custom_$k)]] } {
                 set v [string trim $::settings(lumen_custom_$k)]
@@ -4236,23 +4238,31 @@ proc ::lumen::custom::palette { base bh bs ah as } {
         set l [expr {$l + $ink3_step}]
         set ink3 [hsl_rgb $bh 16 $l]
     }
-    # Accent: the same, to 3:1 (large text and controls).
-    set acc [hsl_rgb $ah $as $acc_l]
-    set l $acc_l
-    while { [contrast $acc $glass] < 3.06 && ($acc_step > 0 ? $l < $acc_max : $l > $acc_max) } {
-        set l [expr {$l + $acc_step}]
-        set acc [hsl_rgb $ah $as $l]
-    }
-
     # Accent panels and pills: the bake's crema_fil REPLACES the white glass
     # -- a faint accent wash over the shadowed ground (12/255 on dark,
     # (255,206,132) at 120/255 on light), never the full-strength accent.
-    if { $dark } {
-        set accfill_rgb $acc ; set accfill_a 0.06
-    } else {
-        set accfill_rgb [hsl_rgb $ah $as 76] ; set accfill_a 0.47
+    # On dark the wash is the accent itself, so it is re-derived inside
+    # the guard loop below.
+    set accfill_a [expr {$dark ? 0.06 : 0.47}]
+    set accfill_rgb [hsl_rgb $ah $as 76]
+    # 0.52.0: the neutral accent (saturation 0, the picker's white / black
+    # swatch) starts near white on dark and near black on light; the
+    # hue-tuned start (59 / 44) is a mid grey for it, which read as dull.
+    if { $as <= 0 } { set acc_l [expr {$dark ? 88 : 25}] }
+    # Accent: the same, to 3:1 (large text and controls), against the plain
+    # glass AND its own wash (0.52.0): the hero number, Done and the Steam /
+    # Water buttons sit on the wash, a mid tone on a light base that the
+    # plain-glass floor left at 2.1:1 in the worst case.
+    set acc [hsl_rgb $ah $as $acc_l]
+    set l $acc_l
+    while { 1 } {
+        if { $dark } { set accfill_rgb $acc }
+        set accpanel [over $accfill_rgb $accfill_a $shaded]
+        if { [contrast $acc $glass] >= 3.06 && [contrast $acc $accpanel] >= 3.06 } { break }
+        if { $acc_step > 0 ? $l >= $acc_max : $l <= $acc_max } { break }
+        set l [expr {$l + $acc_step}]
+        set acc [hsl_rgb $ah $as $l]
     }
-    set accpanel [over $accfill_rgb $accfill_a $shaded]
 
     dict set P bg        [rgb_hex $mid]
     dict set P bg_top    [rgb_hex $top]
@@ -4565,7 +4575,9 @@ proc ::lumen::custom::screen {} {
 # drawn by an older one are redrawn (2 = 0.46.1's shadow-under-glass model).
 proc ::lumen::custom::signature { pr } {
     # 3 = 0.49.0: the glass material files joined the set.
-    return "3 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
+    # 4 = 0.52.0: the accent derivation changed (wash guard, neutral start),
+    #     so files painted with the old accent are redrawn once.
+    return "4 [dict get $pr base] [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
 }
 
 # Makes sure lumen_*_custom.png exist for the screen and match the saved
