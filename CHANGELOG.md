@@ -4,6 +4,33 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.51.0 - picker redesign: 52 swatches incl. neutral and brown, a roomy grid, a painted miniature; the wait pill fits its text - TABLET-VERIFIED 2026-09-17 22:11 (picker eyeballed over the owner's rose/violet light set: grids breathe, neutral + brown + rich + vivid taps set both values and ring the swatch, the miniature repaints in 220 ms per tap and tracks the gradient, bloom and panels; first capture showed both captions and two preset labels overrunning and the miniature's band on the card edge, all three fixed in the same pass; a forced re-bake showed "Applying Custom: drawing backgrounds..." inside a pill sized to it; whole custom apply with bake 17.9 s, 0 problems; owner's set restored, no marker left)
+
+Base: 0.50.1. Owner review of the picker: swatches too close and mashed,
+text too tight, the preview less colourful than the applied theme, and a
+wish for more colours (black, white, brown); plus a wait-pill line that
+ran past its card. **Safety status: unchanged. Same five prefs, same
+files; a miniature photo per preview refresh, freed each time.**
+
+- Swatches are {hue saturation} pairs now, two rows of 13 per control:
+  BACKDROP row 1 grey + 12 hues tinted (36), row 2 taupe + 12 hues rich
+  (62); ACCENT row 1 white/black (neutral, the contrast guard settles it
+  per base) + 12 vivid (85), row 2 brown + 12 muted (45). A tap sets both
+  values (`theme_pick key hue sat`); presets unchanged.
+- Layout: a 640-wide controls column with labels ABOVE full-width grids
+  (38 px dots on a 46 px pitch, 44 px zones that never overlap), presets
+  as one row of six; a 330-wide preview column. Tokens `L(thp_*)`.
+- Preview: `_preview_render` paints the HOME page from the pending palette
+  with the custom painter at 330/1340 (gradient, bloom, real panels) into
+  an image item under a few readable labels; five token chips (Page,
+  Glass, Text, Accent, Chip) show the derived colours themselves.
+- `_wait_pill_box`: the pill is measured to its text (floor 560, cap 1300
+  design px); the bake line is shorter.
+- Harness: 26 + 26 swatches, neutral and brown positions, pair taps, the
+  miniature and chips, the pill growth and floor.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.50.1 - fix: a light-base custom set hung the bake (app stuck on "Applying", then at startup) - TABLET-VERIFIED 2026-09-16 22:25 (rescue build pushed over the stuck app; restart drew the Sea glass set in 12.5 s and loaded)
 
 Base: 0.50.0. Owner report: applying Sea glass stuck on the wait pill; after

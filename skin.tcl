@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.50.1  (fix: light-base custom bake hung on narrow pills; see `variable version`)
+#  Version: 0.51.0  (picker redesign: swatch pairs, roomy grid, painted miniature; wait pill sized to its text; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.50.1"
+    variable version "0.51.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -688,6 +688,21 @@ proc ::lumen::_init_layout {} {
     # left column's group starts at 402, this ends at 170 + 24 + 180 = 374.
     set L(set_mode_dx) 70
     set L(set_mode_w) 180 ; set L(set_mode_h) 48
+
+    # Theme picker (0.51.0 redesign): a 640-wide controls column with the
+    # labels ABOVE full-width swatch grids (two rows of 13 circles), and a
+    # 330-wide preview column holding a painted miniature of the home page
+    # (1340x800 at 330/1340), five token chips and the notes.
+    set L(thp_x)  170 ; set L(thp_w)  640      ;# controls 170..810
+    set L(thp_px) 840 ; set L(thp_pw) 330      ;# preview 840..1170
+    set L(thp_base_y) 104 ; set L(thp_base_h) 80
+    set L(thp_bh_y) 196 ; set L(thp_ah_y) 360 ; set L(thp_sw_h) 152
+    set L(thp_pre_y) 524 ; set L(thp_pre_h) 88
+    set L(thp_dot) 38 ; set L(thp_pitch) 46    ;# 13 x 46 - 8 = 590 inside 592
+    set L(thp_row1) 48 ; set L(thp_row2) 96    ;# swatch row offsets inside the row
+    set L(thp_mini_y) 146 ; set L(thp_mini_h) 197
+    set L(thp_chip_y) 364 ; set L(thp_chip_w) 58 ; set L(thp_chip_h) 36 ; set L(thp_chip_gap) 10
+    set L(thp_note_y) 440 ; set L(thp_note2_y) 506 ; set L(thp_status_y) 566
 
     # ---- fonts: physical pixels, 16px floor ----------------------------
     # Fallback names first, so every key is valid even if font creation
@@ -3754,8 +3769,7 @@ proc ::lumen::wait_show { text } {
         # 150 ms timer cannot fire during the apply, so clear it here or it
         # sits there in the OLD theme's fill until the end (seen on-tablet).
         .can delete lumen_tapflash
-        set px1 [rescale_x_skin [X 390]] ; set py1 [rescale_y_skin [Y 352]]
-        set px2 [rescale_x_skin [X 950]] ; set py2 [rescale_y_skin [Y 448]]
+        lassign [_wait_pill_box $text] px1 py1 px2 py2
         set lw [expr {int(max(2, [rescale_y_skin 4]))}]
         .can create polygon {*}[_flash_pts $px1 $py1 $px2 $py2 [rescale_y_skin 96]] -smooth 1 \
             -fill $C(glass_2) -outline $C(crema) -width $lw -tags [list lumen_wait lumen_wait_pill]
@@ -3768,9 +3782,28 @@ proc ::lumen::wait_show { text } {
     }
 }
 
+# 0.51.0: the pill is sized to its text (owner report: a long step line
+# ran past the card). Physical px: measured text width plus 40 design px
+# each side, never narrower than 560 design px, never wider than the
+# screen minus the margins; centred on (670, 400).
+proc ::lumen::_wait_pill_box { text } {
+    variable L
+    set tw 0
+    if { [catch { set tw [font measure $L(font_primary) $text] }] || ![string is double -strict $tw] } { set tw 0 }
+    set pad [rescale_x_skin [X 40]]
+    set w [expr {max([rescale_x_skin [X 560]], $tw + 2 * $pad)}]
+    set maxw [rescale_x_skin [X 1300]]
+    if { $w > $maxw } { set w $maxw }
+    set cx [rescale_x_skin [X 670]]
+    set py1 [rescale_y_skin [Y 352]] ; set py2 [rescale_y_skin [Y 448]]
+    return [list [expr {$cx - $w / 2.0}] $py1 [expr {$cx + $w / 2.0}] $py2]
+}
+
 proc ::lumen::wait_step { text } {
     variable C
     if { [catch {
+        lassign [_wait_pill_box $text] px1 py1 px2 py2
+        .can coords lumen_wait_pill {*}[_flash_pts $px1 $py1 $px2 $py2 [rescale_y_skin 96]]
         .can itemconfigure lumen_wait_pill -fill $C(glass_2) -outline $C(crema)
         .can itemconfigure lumen_wait_text -text $text -fill $C(ink)
         update idletasks
@@ -3920,8 +3953,19 @@ namespace eval ::lumen::custom {
     variable pend
     array set pend {base dark bh 222 bs 32 ah 34 as 86}
 
-    # Swatch hues, six per row on the picker.
+    # The twelve hues (also the harness's contrast sweep).
     variable hues {0 30 45 60 100 150 180 200 222 250 280 320}
+
+    # 0.51.0: a swatch is a {hue saturation display} triple -- two rows of
+    # thirteen per control. Backdrop row 1: a neutral (grey; black or
+    # white pages come from the base) then the hues tinted at 36, like the
+    # presets; row 2: taupe then the hues rich at 62. Accent row 1: a
+    # neutral (white on a dark base, black on a light one, the contrast
+    # guard settles the exact tone) then the hues vivid at 85; row 2: a
+    # brown then the hues muted at 45 (olive, navy, plum, rust...).
+    # Built on first use by ::lumen::custom::swatches (the colour maths
+    # procs are defined below this block).
+    variable swatch_table ""
 
     # name base bh bs ah as
     variable presets {
@@ -4013,6 +4057,22 @@ proc ::lumen::custom::hex_rgb { hex } {
 }
 
 proc ::lumen::custom::hsl_hex { h s l } { return [rgb_hex [hsl_rgb $h $s $l]] }
+
+# The picker's swatch table (see the namespace comment): dict bh|ah ->
+# list of {hue sat display}, 26 each, memoized.
+proc ::lumen::custom::swatches { key } {
+    variable swatch_table
+    variable hues
+    if { $swatch_table eq "" } {
+        set r1 [list [list 0 0 "#7A7A7A"]] ; set r2 [list [list 30 22 [hsl_hex 30 22 40]]]
+        foreach h $hues { lappend r1 [list $h 36 [hsl_hex $h 36 45]] ; lappend r2 [list $h 62 [hsl_hex $h 62 45]] }
+        dict set swatch_table bh [concat $r1 $r2]
+        set r1 [list [list 0 0 "#C8C8C8"]] ; set r2 [list [list 30 30 [hsl_hex 30 30 42]]]
+        foreach h $hues { lappend r1 [list $h 85 [hsl_hex $h 85 58]] ; lappend r2 [list $h 45 [hsl_hex $h 45 50]] }
+        dict set swatch_table ah [concat $r1 $r2]
+    }
+    return [dict get $swatch_table $key]
+}
 
 # top (rgb list) at alpha a over bottom (rgb list) -> rgb list.
 proc ::lumen::custom::over { top a bot } {
@@ -4619,7 +4679,7 @@ proc ::lumen::apply_theme { mode } {
     # they retint without files.)
     set word [_theme_word $mode]
     if { $mode eq "custom" && !$_flat_pages } {
-        wait_step "[translate {Applying}] $word: [translate {drawing the backgrounds (a few seconds)...}]"
+        wait_step "[translate {Applying}] $word: [translate {drawing backgrounds...}]"
         set baked 0
         if { [catch { set baked [::lumen::custom::ensure_bake] } err] } {
             msg -ERROR "Lumen: custom theme bake threw: $err"
@@ -5566,9 +5626,12 @@ proc ::lumen::act::open_theme_picker {} {
     ::lumen::refresh_preview
 }
 
-proc ::lumen::act::theme_pick { key value } {
+# key: base | bh | ah. 0.51.0: a hue swatch carries its saturation too
+# (bh -> bs, ah -> as).
+proc ::lumen::act::theme_pick { key value {sat ""} } {
     variable ::lumen::custom::pend
     set pend($key) $value
+    if { $sat ne "" && $key in {bh ah} } { set pend([string index $key 0]s) $sat }
     ::lumen::refresh_preview
 }
 
@@ -5640,12 +5703,11 @@ proc ::lumen::theme_page_status { text } {
 proc ::lumen::refresh_preview {} {
     variable C
     variable ::lumen::custom::pend
-    variable ::lumen::custom::hues
     variable ::lumen::custom::presets
     if { [catch {
         set P [::lumen::custom::palette $pend(base) $pend(bh) $pend(bs) $pend(ah) $pend(as)]
         set can [dui canvas]
-        foreach tok {glass glass_2 glass_brd ink ink_2 ink_3 crema crema_lo crema_brd good} {
+        foreach tok {bg glass glass_2 glass_brd ink ink_2 ink_3 crema crema_lo crema_brd good} {
             set v [dict get $P $tok]
             $can itemconfigure lumen_thp_$tok -fill $v
             $can itemconfigure lumen_tho_$tok -outline $v
@@ -5657,11 +5719,17 @@ proc ::lumen::refresh_preview {} {
                 -outline [expr {$on ? $C(crema_brd) : $C(glass_brd)}]
             $can itemconfigure lumen_thbt_$b -fill [expr {$on ? $C(crema) : $C(ink_2)}]
         }
+        # 0.51.0: a swatch is selected when BOTH its hue and saturation are
+        # the pending ones (a preset's values may match none).
         foreach key {bh ah} {
-            foreach h $hues {
-                set on [expr {$pend($key) == $h}]
-                $can itemconfigure lumen_ths_${key}_$h \
+            set sk [string index $key 0]s
+            set i 0
+            foreach sw [::lumen::custom::swatches $key] {
+                lassign $sw h s
+                set on [expr {$pend($key) == $h && $pend($sk) == $s}]
+                $can itemconfigure lumen_ths_${key}_$i \
                     -outline [expr {$on ? $C(ink) : $C(glass_brd)}] -width [expr {$on ? 6 : 2}]
+                incr i
             }
         }
         for { set i 0 } { $i < [llength $presets] / 6 } { incr i } {
@@ -5671,15 +5739,43 @@ proc ::lumen::refresh_preview {} {
             $can itemconfigure lumen_thpr_$i \
                 -outline [expr {$on ? $C(ink) : $C(glass_brd)}] -width [expr {$on ? 6 : 2}]
         }
+        _preview_render $P
     } err] } {
         msg -ERROR "Lumen: theme preview refresh failed: $err"
+    }
+}
+
+# 0.51.0: the miniature. The home page painted by the same painter that
+# draws the custom backgrounds, from the PENDING palette, at the preview
+# column's width (330/1340 of the real thing), handed to the image item
+# under the preview texts; the previous photo is freed. Headless, or on
+# any failure, the pending page colour rect beneath it stays visible.
+proc ::lumen::_preview_render { P } {
+    variable L
+    variable preview_img
+    if { [info commands image] eq "" } { return }
+    if { [catch {
+        lassign [::lumen::custom::screen] W H
+        if { $W <= 0 } { error "no screen size" }
+        set mw [expr {int(round($L(thp_pw) * $W / 1340.0))}]
+        set mh [expr {int(round($L(thp_mini_h) * $H / 800.0))}]
+        set t0 [clock milliseconds]
+        set img [::lumen::custom::page_photo $P [dict get $::lumen::custom::pages home] $mw $mh]
+        set can [dui canvas]
+        $can itemconfigure lumen_th_mini -image $img
+        if { [info exists preview_img] && $preview_img ne "" && $preview_img ne $img } {
+            image delete $preview_img
+        }
+        set preview_img $img
+        msg -DEBUG "Lumen: preview miniature ${mw}x${mh} painted in [expr {[clock milliseconds] - $t0}] ms"
+    } err] } {
+        msg -NOTICE "Lumen: preview miniature not painted: $err"
     }
 }
 
 proc ::lumen::build_theme_page {} {
     variable C
     variable L
-    variable ::lumen::custom::hues
     variable ::lumen::custom::presets
     set p "lumen_theme"
     set n 0     ;# unique first tag per item (dui refuses duplicates)
@@ -5689,125 +5785,127 @@ proc ::lumen::build_theme_page {} {
     var $p $L(center_x) 72 {[::lumen::data::version_line]} \
         -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
 
-    lassign $L(set_rows) ry1 ry2 ry3 ry4
-    set lx $L(set_col_l) ; set lw $L(set_col_l_w)
-    set rx $L(set_col_r) ; set rw $L(set_col_r_w)
+    set lx $L(thp_x) ; set lw $L(thp_w) ; set ix [expr {$lx + $L(pad_x)}]
 
     # ---- BASE ----
-    glass $p $lx $ry1 $lw $L(set_row_h)
-    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry1 + 26}] [translate "BASE"] -font $L(font_label) -fill $C(ink_3)
-    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry1 + 56}] [translate "Dark glass or pale glass."] \
+    set by $L(thp_base_y)
+    glass $p $lx $by $lw $L(thp_base_h)
+    txt $p $ix [expr {$by + 18}] [translate "BASE"] -font $L(font_label) -fill $C(ink_3)
+    txt $p $ix [expr {$by + 44}] [translate "Dark glass or pale glass."] \
         -font $L(font_caption) -fill $C(ink_2)
     foreach {b bx bw lbl} [list dark 402 100 "Dark" light 510 96 "Light"] {
-        set by [expr {$ry1 + 35}]
-        rounded_rect $p [X $bx] [Y $by] [X [expr {$bx + $bw}]] [Y [expr {$by + 48}]] [X 32] \
+        set py [expr {$by + 16}]
+        rounded_rect $p [X $bx] [Y $py] [X [expr {$bx + $bw}]] [Y [expr {$py + 48}]] [X 32] \
             -fill $C(glass_2) -outline $C(glass_brd) -width 2 -tags [list lumen_thi_[incr n] lumen_thb_$b]
-        dui add dtext $p [X [expr {$bx + $bw / 2.0}]] [Y [expr {$by + 24}]] -text [translate $lbl] \
+        dui add dtext $p [X [expr {$bx + $bw / 2.0}]] [Y [expr {$py + 24}]] -text [translate $lbl] \
             -font $L(font_button) -fill $C(ink_2) -anchor center -justify center \
             -tags [list lumen_thi_[incr n] lumen_thbt_$b]
-        tap $p $bx $by $bw 48 "::lumen::act::theme_pick base $b" "Base $lbl"
+        tap $p $bx $py $bw 48 "::lumen::act::theme_pick base $b" "Base $lbl"
     }
 
-    # ---- BACKDROP and ACCENT swatch rows ----
+    # ---- BACKDROP and ACCENT: label + caption on one line, two rows of 13 ----
+    set d $L(thp_dot) ; set pitch $L(thp_pitch)
     foreach {key ry title cap} [list \
-        bh $ry2 "BACKDROP" "The tint the page and its glass are built on." \
-        ah $ry3 "ACCENT"   "Replaces crema: hero number, buttons, links."] {
-        glass $p $lx $ry $lw $L(set_row_h)
-        txt $p [expr {$lx + $L(pad_x)}] [expr {$ry + 26}] [translate $title] -font $L(font_label) -fill $C(ink_3)
-        txt $p [expr {$lx + $L(pad_x)}] [expr {$ry + 56}] [translate $cap] \
-            -font $L(font_caption) -fill $C(ink_2) -width 150
+        bh $L(thp_bh_y) "BACKDROP" "Page and glass tint. Grey, tinted, taupe, rich." \
+        ah $L(thp_ah_y) "ACCENT"   "Hero number, buttons, links. White, vivid, brown, muted."] {
+        glass $p $lx $ry $lw $L(thp_sw_h)
+        txt $p $ix [expr {$ry + 18}] [translate $title] -font $L(font_label) -fill $C(ink_3)
+        txt $p [expr {$ix + 110}] [expr {$ry + 18}] [translate $cap] \
+            -font $L(font_caption) -fill $C(ink_2)
         set i 0
-        foreach h $hues {
-            set sx [expr {352 + ($i % 6) * 46}]
-            set sy [expr {$ry + 16 + ($i >= 6 ? 52 : 0)}]
-            set fill [expr {$key eq "bh" ? [::lumen::custom::hsl_hex $h 45 45] : [::lumen::custom::hsl_hex $h 85 58]}]
-            dui add canvas_item oval $p [X $sx] [Y $sy] [X [expr {$sx + 44}]] [Y [expr {$sy + 44}]] \
-                -fill $fill -outline $C(glass_brd) -width 2 \
-                -tags [list lumen_thi_[incr n] lumen_ths_${key}_$h]
-            tap $p $sx $sy 44 44 "::lumen::act::theme_pick $key $h" "Hue $h"
+        foreach sw [::lumen::custom::swatches $key] {
+            lassign $sw h s disp
+            set sx [expr {$ix + ($i % 13) * $pitch}]
+            set sy [expr {$ry + ($i < 13 ? $L(thp_row1) : $L(thp_row2))}]
+            dui add canvas_item oval $p [X $sx] [Y $sy] [X [expr {$sx + $d}]] [Y [expr {$sy + $d}]] \
+                -fill $disp -outline $C(glass_brd) -width 2 \
+                -tags [list lumen_thi_[incr n] lumen_ths_${key}_$i]
+            # 44 px zones on a 46 px pitch: touch floor kept, never overlapping.
+            tap $p [expr {$sx - 3}] [expr {$sy - 3}] 44 44 "::lumen::act::theme_pick $key $h $s" "Colour $h $s"
             incr i
         }
     }
 
-    # ---- PRESETS ----
-    glass $p $lx $ry4 $lw $L(set_row_h)
-    txt $p [expr {$lx + $L(pad_x)}] [expr {$ry4 + 26}] [translate "PRESETS"] -font $L(font_label) -fill $C(ink_3)
+    # ---- PRESETS: six pills in one row ----
+    set ry $L(thp_pre_y)
+    glass $p $lx $ry $lw $L(thp_pre_h)
+    txt $p $ix [expr {$ry + 16}] [translate "PRESETS"] -font $L(font_label) -fill $C(ink_3)
     for { set i 0 } { $i < [llength $presets] / 6 } { incr i } {
         lassign [lrange $presets [expr {$i * 6}] [expr {$i * 6 + 5}]] name pb ph ps pa pas
         set PP [::lumen::custom::palette $pb $ph $ps $pa $pas]
-        set px [expr {302 + ($i % 3) * 112}]
-        set py [expr {$ry4 + 16 + ($i / 3) * 52}]
-        rounded_rect $p [X $px] [Y $py] [X [expr {$px + 104}]] [Y [expr {$py + 44}]] [X 24] \
+        # 96-wide pills on a 99 pitch: "Lumen light" needs the width.
+        set px [expr {$ix + $i * 99}] ; set py [expr {$ry + 36}]
+        rounded_rect $p [X $px] [Y $py] [X [expr {$px + 96}]] [Y [expr {$py + 44}]] [X 24] \
             -fill [dict get $PP bg] -outline $C(glass_brd) -width 2 \
             -tags [list lumen_thi_[incr n] lumen_thpr_$i]
-        dui add dtext $p [X [expr {$px + 52}]] [Y [expr {$py + 22}]] -text [translate $name] \
+        dui add dtext $p [X [expr {$px + 48}]] [Y [expr {$py + 22}]] -text [translate $name] \
             -font $L(font_label) -fill [dict get $PP crema] -anchor center -justify center \
             -tags [list lumen_thi_[incr n]]
-        tap $p $px $py 104 44 "::lumen::act::theme_preset $i" $name
+        tap $p $px $py 96 44 "::lumen::act::theme_preset $i" $name
     }
 
-    # ---- PREVIEW column: every item tagged by the token it shows ----
-    set pv_y $ry1 ; set pv_h [expr {$ry4 + $L(set_row_h) - $ry1}]
-    rounded_rect $p [X $rx] [Y $pv_y] [X [expr {$rx + $rw}]] [Y [expr {$pv_y + $pv_h}]] [X 52] \
-        -fill $C(glass) -outline $C(glass_brd) -width 2 \
-        -tags [list lumen_thi_[incr n] lumen_thp_glass lumen_tho_glass_brd]
-    dui add dtext $p [X [expr {$rx + $L(pad_x)}]] [Y [expr {$pv_y + 26}]] -text [translate "PREVIEW"] \
-        -font $L(font_label) -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    # ---- PREVIEW column ----
+    set rx $L(thp_px) ; set rw $L(thp_pw)
+    set pv_y $L(thp_base_y) ; set pv_h [expr {$L(thp_pre_y) + $L(thp_pre_h) - $pv_y}]
+    glass $p $rx $pv_y $rw $pv_h
+    txt $p [expr {$rx + $L(pad_x)}] [expr {$pv_y + 16}] [translate "PREVIEW"] \
+        -font $L(font_label) -fill $C(ink_3)
+    # The miniature: a rect in the pending page colour, the painted photo
+    # over it, a hairline around both, and a few readable labels on top
+    # (the real text would be 4 px tall at this scale).
+    set my $L(thp_mini_y) ; set mh $L(thp_mini_h)
+    dui add canvas_item rectangle $p [X $rx] [Y $my] [X [expr {$rx + $rw}]] [Y [expr {$my + $mh}]] \
+        -fill $C(bg) -outline "" -tags [list lumen_thi_[incr n] lumen_thp_bg]
+    dui add canvas_item image $p [X $rx] [Y $my] -anchor nw \
+        -tags [list lumen_thi_[incr n] lumen_th_mini]
+    dui add canvas_item rectangle $p [X $rx] [Y $my] [X [expr {$rx + $rw}]] [Y [expr {$my + $mh}]] \
+        -fill "" -outline $C(glass_brd) -width 2 -tags [list lumen_thi_[incr n] lumen_tho_glass_brd]
+    set k [expr {double($rw) / 1340.0}]
+    # grind card (16,64 650x190): the hero and the band
+    dui add dtext $p [X [expr {$rx + (16 + 325) * $k}]] [Y [expr {$my + 126 * $k}]] -text "2.8" \
+        -font $L(font_section) -fill $C(crema) -anchor center -justify center \
+        -tags [list lumen_thi_[incr n] lumen_thp_crema]
+    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 216 * $k}]] -text "[translate Good] - 12 [translate shots]" \
+        -font $L(font_caption) -fill $C(good) -anchor w -justify left \
+        -tags [list lumen_thi_[incr n] lumen_thp_good]
+    # last-shot card (682,64 642x190)
+    dui add dtext $p [X [expr {$rx + 706 * $k}]] [Y [expr {$my + 96 * $k}]] -text [translate "LAST SHOT"] \
+        -font $L(font_caption) -fill $C(ink_3) -anchor w -justify left \
+        -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    dui add dtext $p [X [expr {$rx + 706 * $k}]] [Y [expr {$my + 180 * $k}]] -text "2.1  19.0  38.0" \
+        -font $L(font_caption) -fill $C(ink) -anchor w -justify left \
+        -tags [list lumen_thi_[incr n] lumen_thp_ink]
+    # next-shot strip (16,574 1308x210)
+    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 598 * $k}]] -text [translate "NEXT SHOT"] \
+        -font $L(font_caption) -fill $C(ink_3) -anchor w -justify left \
+        -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 672 * $k}]] -text "Las Brumas" \
+        -font $L(font_primary) -fill $C(ink) -anchor w -justify left \
+        -tags [list lumen_thi_[incr n] lumen_thp_ink]
 
-    # mini grind card
-    set gx 694 ; set gy 166 ; set gw 452 ; set gh 150
-    rounded_rect $p [X $gx] [Y $gy] [X [expr {$gx + $gw}]] [Y [expr {$gy + $gh}]] [X 40] \
-        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
-        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
-    dui add dtext $p [X 712] [Y 184] -text [translate "RECOMMENDED GRIND"] -font $L(font_label) \
-        -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
-    rounded_rect $p [X 978] [Y 182] [X 1128] [Y 208] [X 26] \
-        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
-        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
-    dui add dtext $p [X 1053] [Y 195] -text [translate "Regression"] -font $L(font_label) \
-        -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
-    dui add dtext $p [X 920] [Y 214] -text "2.1" -font $L(font_metric) -fill $C(crema) \
-        -anchor n -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
-    dui add dtext $p [X 712] [Y 288] -text "[translate Good]  -  11 [translate shots]" \
-        -font $L(font_caption) -fill $C(good) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_good]
-    dui add dtext $p [X 1130] [Y 288] -text [translate "Shot analysis"] -font $L(font_caption) \
-        -fill $C(crema) -anchor ne -justify right -tags [list lumen_thi_[incr n] lumen_thp_crema]
-
-    # mini next-shot strip (332..468: label 348, name 370->394, pills
-    # 406..454 -- the first tablet screenshot had the name over the pills)
-    set sx 694 ; set sy 332 ; set sw 452 ; set sh 136
-    rounded_rect $p [X $sx] [Y $sy] [X [expr {$sx + $sw}]] [Y [expr {$sy + $sh}]] [X 40] \
-        -fill $C(glass_2) -outline $C(glass_brd) -width 2 \
-        -tags [list lumen_thi_[incr n] lumen_thp_glass_2 lumen_tho_glass_brd]
-    dui add dtext $p [X 712] [Y 348] -text [translate "NEXT SHOT"] -font $L(font_label) \
-        -fill $C(ink_3) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
-    dui add dtext $p [X 712] [Y 370] -text "Las Brumas" -font $L(font_primary) \
-        -fill $C(ink) -anchor nw -tags [list lumen_thi_[incr n] lumen_thp_ink]
-    foreach {bx glyph} {712 - 864 +} {
-        rounded_rect $p [X $bx] [Y 406] [X [expr {$bx + 44}]] [Y 454] [X 32] \
-            -fill $C(glass) -outline $C(glass_brd) -width 2 \
-            -tags [list lumen_thi_[incr n] lumen_thp_glass lumen_tho_glass_brd]
-        dui add dtext $p [X [expr {$bx + 22}]] [Y [expr {430 + ($glyph eq "-" ? $L(step_minus_dy) : 0)}]] \
-            -text $glyph -font $L(font_section) -fill $C(crema) -anchor center -justify center \
-            -tags [list lumen_thi_[incr n] lumen_thp_crema]
+    # Token chips: the derived colours themselves, labelled.
+    set cy $L(thp_chip_y) ; set cw $L(thp_chip_w) ; set ch $L(thp_chip_h)
+    set i 0
+    foreach {tok lbl} [list bg "Page" glass "Glass" ink "Text" crema "Accent" crema_lo "Chip"] {
+        set cx [expr {$rx + $i * ($cw + $L(thp_chip_gap))}]
+        rounded_rect $p [X $cx] [Y $cy] [X [expr {$cx + $cw}]] [Y [expr {$cy + $ch}]] [X 16] \
+            -fill $C($tok) -outline $C(glass_brd) -width 2 \
+            -tags [list lumen_thi_[incr n] lumen_thp_$tok lumen_tho_glass_brd]
+        dui add dtext $p [X [expr {$cx + $cw / 2.0}]] [Y [expr {$cy + $ch + 6}]] -text [translate $lbl] \
+            -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center \
+            -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
+        incr i
     }
-    dui add dtext $p [X 810] [Y 430] -text "2.1" -font $L(font_data) -fill $C(ink) \
-        -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_ink]
-    rounded_rect $p [X 940] [Y 406] [X 1126] [Y 454] [X 32] \
-        -fill $C(crema_lo) -outline $C(crema_brd) -width 2 \
-        -tags [list lumen_thi_[incr n] lumen_thp_crema_lo lumen_tho_crema_brd]
-    dui add dtext $p [X 1033] [Y 430] -text [translate "Set dose"] -font $L(font_button) \
-        -fill $C(crema) -anchor center -justify center -tags [list lumen_thi_[incr n] lumen_thp_crema]
 
-    dui add dtext $p [X 694] [Y 486] -width [X 452] -anchor nw -justify left \
+    dui add dtext $p [X $rx] [Y $L(thp_note_y)] -width [X $rw] -anchor nw -justify left \
         -text [translate "Tap Done: every page switches to these colours at once. New colours take a few seconds to draw."] \
         -font $L(font_caption) -fill $C(ink_2) -tags [list lumen_thi_[incr n] lumen_thp_ink_2]
-    dui add dtext $p [X 694] [Y 550] -width [X 452] -anchor nw -justify left \
+    dui add dtext $p [X $rx] [Y $L(thp_note2_y)] -width [X $rw] -anchor nw -justify left \
         -text [translate "Contrast is guarded: labels and the accent always stay readable on the glass."] \
         -font $L(font_caption) -fill $C(ink_3) -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
-    # 0.47.0: status line for the live apply ("Drawing your theme..." /
-    # the failure), in the CURRENT theme's accent, blank otherwise.
-    txt $p 694 598 "" -font $L(font_caption) -fill $C(crema) -width 452 -tags lumen_th_status
+    # Status line for the live apply ("Drawing your theme..." / the
+    # failure), in the CURRENT theme's accent, blank otherwise.
+    txt $p $rx $L(thp_status_y) "" -font $L(font_caption) -fill $C(crema) -width $rw -tags lumen_th_status
 
     # ---- Cancel / Done ----
     txt $p 194 716 [translate "Cancel"] -font $L(font_button) -fill $C(crema)

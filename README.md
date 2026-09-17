@@ -8,7 +8,15 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.50.1 — every page built, baked and running on the tablet.**
+**Version 0.51.0 — every page built, baked and running on the tablet.**
+
+New in 0.51.0: **a roomier colour picker with 52 swatches and a true
+preview.** Backdrop and accent each offer two rows of thirteen: a neutral
+(grey backdrop; white or black accent), brown and taupe, and the twelve
+hues both tinted and rich (backdrop) or vivid and muted (accent). The
+preview is the home page itself, painted by the theme's own painter from
+the colours you are choosing, with chips of the derived page, glass, text,
+accent and chip colours beneath it.
 
 New in 0.50.0: **a wait pill while a theme applies.** Switching a theme
 takes a few seconds (the DYE pages are rebuilt, and a new custom set is
