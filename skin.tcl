@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.52.0  (custom palette: accent guarded against its wash fill, neutral accent near white / black, saturation 0 saved; see `variable version`)
+#  Version: 0.52.1  (polish: the picker miniature's labels no longer touch; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.52.0"
+    variable version "0.52.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -5873,11 +5873,15 @@ proc ::lumen::build_theme_page {} {
     dui add canvas_item rectangle $p [X $rx] [Y $my] [X [expr {$rx + $rw}]] [Y [expr {$my + $mh}]] \
         -fill "" -outline $C(glass_brd) -width 2 -tags [list lumen_thi_[incr n] lumen_tho_glass_brd]
     set k [expr {double($rw) / 1340.0}]
-    # grind card (16,64 650x190): the hero and the band
-    dui add dtext $p [X [expr {$rx + (16 + 325) * $k}]] [Y [expr {$my + 126 * $k}]] -text "2.8" \
-        -font $L(font_section) -fill $C(crema) -anchor center -justify center \
+    # grind card (16,64 650x190): the hero and the band. 0.52.1: the fonts
+    # do not shrink with the card (47 px tall here), so the two lines are
+    # placed from the card's TOP in design px, the hero one size down
+    # (primary), and neither bbox crosses the other or the card edge.
+    set gc_top [expr {$my + 64 * $k}]
+    dui add dtext $p [X [expr {$rx + (16 + 325) * $k}]] [Y [expr {$gc_top + 13.5}]] -text "2.8" \
+        -font $L(font_primary) -fill $C(crema) -anchor center -justify center \
         -tags [list lumen_thi_[incr n] lumen_thp_crema]
-    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 216 * $k}]] -text "[translate Good] - 12 [translate shots]" \
+    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$gc_top + 36.5}]] -text "[translate Good] - 12 [translate shots]" \
         -font $L(font_caption) -fill $C(good) -anchor w -justify left \
         -tags [list lumen_thi_[incr n] lumen_thp_good]
     # last-shot card (682,64 642x190)
@@ -5887,11 +5891,12 @@ proc ::lumen::build_theme_page {} {
     dui add dtext $p [X [expr {$rx + 706 * $k}]] [Y [expr {$my + 180 * $k}]] -text "2.1  19.0  38.0" \
         -font $L(font_caption) -fill $C(ink) -anchor w -justify left \
         -tags [list lumen_thi_[incr n] lumen_thp_ink]
-    # next-shot strip (16,574 1308x210)
-    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 598 * $k}]] -text [translate "NEXT SHOT"] \
-        -font $L(font_caption) -fill $C(ink_3) -anchor w -justify left \
-        -tags [list lumen_thi_[incr n] lumen_thp_ink_3]
-    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 672 * $k}]] -text "Las Brumas" \
+    # next-shot strip (16,574 1308x210): the bean name only. 0.52.1: the
+    # NEXT SHOT caption is gone -- the strip is 52 px tall here and the
+    # caption, the name and the painted pill row did not fit; LAST SHOT
+    # already shows ink_3. The name sits between the strip's top edge and
+    # its pills (which start 48 px down at this scale).
+    dui add dtext $p [X [expr {$rx + 40 * $k}]] [Y [expr {$my + 574 * $k + 16}]] -text "Las Brumas" \
         -font $L(font_primary) -fill $C(ink) -anchor w -justify left \
         -tags [list lumen_thi_[incr n] lumen_thp_ink]
 

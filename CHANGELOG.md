@@ -4,6 +4,21 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.52.1 - polish: the picker miniature's labels no longer touch - TABLET-VERIFIED 2026-09-17 22:58 (picker eyeballed and its item dump checked: 0 text overlaps, hero 163-188 and band 188-208 inside the 162-209 card, bean name 291-316 above the pills at 324; no re-bake, no Lumen errors)
+
+Base: 0.52.0. Polish batch from the 0.52.0 review (items 5 and 6).
+**Safety status: unchanged; no behaviour change.**
+
+- Miniature: the fonts do not shrink with the 47 px grind card, so the
+  hero "2.8" is one size down (primary) and both lines are placed from
+  the card's top; the NEXT SHOT caption is dropped from the 52 px strip
+  (LAST SHOT already shows that ink) and the bean name sits clear of the
+  painted pill row. Bboxes no longer overlap each other or the card edges.
+- Preset pill labels: already >= 4.5:1 after 0.52.0's accent change (light
+  pills 4.71 / 4.61); the harness now asserts it for every preset.
+
+Files: skin.tcl, tools/check_skin.tcl, docs.
+
 ## 0.52.0 - custom palette: the accent clears 3:1 on its own wash too; the neutral swatch gives a white / black accent and survives a save - TABLET-VERIFIED 2026-09-17 22:48 (restart re-baked the owner's taupe/neutral set as sig `4 dark 30 22 0 0`, 7 files, no marker; home shows the hero, Curve / Shot analysis and Done in #E0E0E0 instead of the pink #AB8282; the picker reopened with BOTH saved swatches ringed and the Accent chip #E0E0E0; a Sea glass tap previewed #157960 on wash #A2D4CB, then Cancel; no Lumen errors)
 
 Base: 0.51.0. A review swept all 1352 swatch pairs through the palette

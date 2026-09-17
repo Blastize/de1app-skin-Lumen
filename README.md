@@ -8,7 +8,7 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.52.0 — every page built, baked and running on the tablet.**
+**Version 0.52.1 — every page built, baked and running on the tablet.**
 
 New in 0.52.0: **truer custom accents.** The accent colour is now kept
 readable on the tinted card it actually sits on (the hero number, Done,
