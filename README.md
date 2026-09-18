@@ -8,7 +8,7 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.52.1 — every page built, baked and running on the tablet.**
+**Version 0.53.0 — every page built, baked and running on the tablet.**
 
 New in 0.52.0: **truer custom accents.** The accent colour is now kept
 readable on the tinted card it actually sits on (the hero number, Done,
@@ -145,6 +145,7 @@ backdrop and let the shadow do the separating.
 | Tile | Shows | Tap |
 |---|---|---|
 | Taskbar (top) | Live clock and date, the "Lumen" wordmark, and the water left in the tank in mL — amber under 300 ml, blank when no machine is connected | The five icons: mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, DE1 side view = the stock app settings, moon = sleep |
+| Favorite profiles 1 2 3 (taskbar, left of the wordmark) | Three profile slots: a dim digit is empty, plain ink is set, accent means that slot's profile is the one loaded right now | Tap an empty slot to store the profile loaded now; tap a set slot to load its profile (refused while the machine is running). Put your backflush profile in one and a cleaning run is one tap plus the GHC button. "Clear favorite profiles" on the Lumen settings page empties all three |
 | Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
 | Grind | GrindAdvisor's next setting for the loaded bag, the change from the last one, method, confidence and shot count. A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, an Estimate chip, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
@@ -402,8 +403,16 @@ clamps its value. Three groups:
 
 * **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
   depth), `lumen_time_format` / `lumen_date_format` (taskbar clock),
-  `lumen_water_low_ml` (amber threshold, 100–800), and the custom theme's
-  `lumen_custom_base` / `_bh` / `_bs` / `_ah` / `_as` (picker Done only).
+  `lumen_water_low_ml` (amber threshold, 100–800), the custom theme's
+  `lumen_custom_base` / `_bh` / `_bs` / `_ah` / `_as` (picker Done only),
+  and `lumen_fav_profiles` (the three favorite slots: a tap on an empty
+  slot stores the loaded profile's filename and title; the settings
+  page's Clear link removes the key).
+* **Profile switch (0.53.0):** a tap on a set favorite slot calls the
+  core's own `select_profile` with that slot's filename (the same call
+  DrinkMenu and DYE make), then `save_settings` + `save_settings_to_de1`
+  a second later. Refused while the machine is running. It never starts
+  a flow: the GHC does.
 * **Files:** the custom theme writes `lumen_<page>_custom.png` and
   `lumen_custom.sig` into `skins/Lumen/<width>x<height>/` — its own
   folder, nothing else.

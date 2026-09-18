@@ -4,6 +4,29 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.53.0 - favorite profile slots 1 2 3 on the taskbar (pass 01) - verify.sh PASS 2026-09-18 11:55 (home + settings dumps inside the virtual canvas, logcat clean, screenshot: three dim digits clear of the date and the wordmark; the assign / load / Clear taps are harness-proven, owner checklist open)
+
+Base: 0.52.1. Owner request: switch profiles without the stock chooser,
+above all the backflush profile a maintenance alert asks for.
+**Safety status: one NEW preference, `lumen_fav_profiles` (slot -> filename
++ title), written by a tap on an EMPTY slot and removed by the settings
+header's "Clear favorite profiles" link, both via `save_settings`. One NEW
+machine-facing action: a tap on a set slot calls the core's
+`select_profile <filename>` (DrinkMenu v1.16.0's proven call, copied with
+its busy guard) and a second later `save_settings; save_settings_to_de1`.
+No flow is ever started; no file, database or history is touched.**
+
+- Taskbar: digits 1 2 3 at 300/372/444, 56x48 zones, between the day
+  label and the wordmark. Dim = empty, ink = set, accent = that slot's
+  profile is loaded now (three stacked fixed-ink items, the dot pattern).
+- Settings header: the Clear link, right-aligned above row 1, blank while
+  no slot is set. No settings row (the page is baked and full).
+- Harness: slot geometry + zone commands; empty tap assigns, set tap
+  selects, busy refuses, a missing file logs and keeps the slot, Clear
+  empties, junk preference reads as no favorites.
+
+Files: skin.tcl, tools/check_skin.tcl, docs; passes/Lumen/pass_01.*.
+
 ## 0.52.1 - polish: the picker miniature's labels no longer touch - TABLET-VERIFIED 2026-09-17 22:58 (picker eyeballed and its item dump checked: 0 text overlaps, hero 163-188 and band 188-208 inside the 162-209 card, bean name 291-316 above the pills at 324; no re-bake, no Lumen errors)
 
 Base: 0.52.0. Polish batch from the 0.52.0 review (items 5 and 6).

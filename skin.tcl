@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.52.1  (polish: the picker miniature's labels no longer touch; see `variable version`)
+#  Version: 0.53.0  (favorite profile slots 1 2 3 on the taskbar; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.52.1"
+    variable version "0.53.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -446,6 +446,20 @@ proc ::lumen::_init_layout {} {
     # Maintenance state dot: top-right corner of the wrench zone, clear of
     # the 22px glyph centred at (1080, 24).
     set L(bar_dot_x)    1102 ; set L(bar_dot_y) 12
+
+    # 0.53.0: three FAVORITE PROFILE slots, left of centre between the
+    # day label and the wordmark -- 56x48 zones on the icon pitch at
+    # 300, 372, 444 (ending 500). The widest day label ("Wed 17 Sep",
+    # 10 caption glyphs at ~9px from 170) ends near 260; the wordmark's
+    # left edge sits near 640. The digits 1 2 3 read dim when the slot
+    # is empty, plain ink when set, accent when that slot's file is the
+    # profile loaded right now.
+    set L(bar_fav_x) {300 372 444}
+    # The settings header's "Clear favorite profiles" link: right-aligned
+    # to the right column's edge (1170), its zone 56..100 ends above the
+    # first row at 110.
+    set L(set_favclr_x) 950 ; set L(set_favclr_w) 220
+    set L(set_favclr_y)  56 ; set L(set_favclr_h)  44
 
     set L(grind_x)   16 ; set L(grind_y)  64
     set L(grind_w)  650 ; set L(grind_h) 190
@@ -2047,6 +2061,66 @@ proc ::lumen::data::water_ml_low {} {
 # (0.34.0: water_label is gone with the card corner readout; the taskbar
 # shows the bare blue value, which needs no heading.)
 
+# 0.53.0 favorite profile slots (taskbar digits 1 2 3).
+#
+# One preference, ::settings(lumen_fav_profiles): a dict slot -> {filename
+# title}, slots 1..3, written only by a tap on an EMPTY slot (stores the
+# profile loaded right now) and by the settings header's Clear link. Read
+# with validation on every 200 ms tick: a missing, malformed or partial
+# value reads as "no favorites", never as an error.
+proc ::lumen::fav_slots {} {
+    set d [::lumen::data::_s ::settings(lumen_fav_profiles)]
+    if { $d eq "" || [catch { dict size $d }] } { return {} }
+    set out [dict create]
+    foreach n {1 2 3} {
+        if { ![dict exists $d $n] } { continue }
+        set v [dict get $d $n]
+        if { [llength $v] != 2 } { continue }
+        set fn [string trim [lindex $v 0]]
+        if { $fn eq "" } { continue }
+        dict set out $n [list $fn [lindex $v 1]]
+    }
+    return $out
+}
+
+# {filename title} for slot n, or "" when the slot is empty.
+proc ::lumen::fav_slot { n } {
+    set d [fav_slots]
+    if { [dict exists $d $n] } { return [dict get $d $n] }
+    return ""
+}
+
+# "empty", "set" or "active" (the slot's file is the loaded profile).
+proc ::lumen::fav_state { n } {
+    set v [fav_slot $n]
+    if { $v eq "" } { return "empty" }
+    set cur [string trim [::lumen::data::_s ::settings(profile_filename)]]
+    if { $cur ne "" && $cur eq [lindex $v 0] } { return "active" }
+    return "set"
+}
+
+# Three stacked fixed-ink items per slot share the digit's spot; the
+# digit moves between them (the taskbar dot pattern -- a canvas item's
+# -fill is fixed at creation).
+proc ::lumen::data::fav_empty { n } {
+    if { [::lumen::fav_state $n] eq "empty" } { return $n }
+    return ""
+}
+proc ::lumen::data::fav_set { n } {
+    if { [::lumen::fav_state $n] eq "set" } { return $n }
+    return ""
+}
+proc ::lumen::data::fav_active { n } {
+    if { [::lumen::fav_state $n] eq "active" } { return $n }
+    return ""
+}
+
+# The settings header link, blank while no slot is set.
+proc ::lumen::data::fav_clear_label {} {
+    if { [dict size [::lumen::fav_slots]] == 0 } { return "" }
+    return [translate "Clear favorite profiles"]
+}
+
 # 0.34.0 clock format preferences (Lumen settings CLOCK row). Read with
 # defaults so an unset key -- every install until now -- behaves exactly
 # as 0.31.0 did: 24-hour, day-month.
@@ -3092,6 +3166,93 @@ proc ::lumen::act::toggle_date_format {} {
     } err] } {
         msg -ERROR "Lumen: could not save the date format: $err"
     }
+}
+
+# 0.53.0 favorite profile slots.
+#
+# Mechanisms copied from DrinkMenu v1.16.0's To-machine tap (tablet-
+# verified), not invented: the busy guard (connected and not Idle/Sleep/
+# GoingToSleep refuses the tap; fails closed), ::select_profile <filename>
+# (core vars.tcl:2932 -- it loads the file into ::settings, marks the
+# profile unchanged and queues the DE1 send itself), then the same 1 s
+# debounced `save_settings; save_settings_to_de1`. Nothing here starts a
+# flow: the GHC does, as everywhere else in this skin.
+proc ::lumen::machine_busy {} {
+    set handle unknown
+    catch { set handle $::de1(device_handle) }
+    if { $handle eq "0" } { return "" }
+    set name unknown
+    catch { set name $::de1_num_state($::de1(state)) }
+    if { $name in {Idle Sleep GoingToSleep} } { return "" }
+    return $name
+}
+
+namespace eval ::lumen::act { variable fav_send_id "" }
+
+proc ::lumen::act::fav_tap { n } {
+    variable fav_send_id
+    set slot [::lumen::fav_slot $n]
+    if { $slot eq "" } {
+        # Empty: remember the profile loaded right now.
+        set fn [string trim [::lumen::data::_s ::settings(profile_filename)]]
+        if { $fn eq "" } {
+            msg -NOTICE "Lumen: no profile is loaded, favorite $n left empty"
+            return
+        }
+        set title $fn
+        catch {
+            set t [string trim $::settings(profile_title)]
+            if { $t ne "" } { set title $t }
+        }
+        if { [catch {
+            set d [::lumen::fav_slots]
+            dict set d $n [list [string range $fn 0 127] [string range $title 0 79]]
+            set ::settings(lumen_fav_profiles) $d
+            save_settings
+        } err] } {
+            msg -ERROR "Lumen: could not save favorite $n: $err"
+            return
+        }
+        msg -NOTICE "Lumen: favorite $n set to '$fn'"
+        return
+    }
+    lassign $slot fn title
+    set busy [::lumen::machine_busy]
+    if { $busy ne "" } {
+        msg -NOTICE "Lumen: machine busy ($busy), favorite $n not loaded"
+        return
+    }
+    set r ""
+    if { [catch { set r [::select_profile $fn] } err] } {
+        msg -ERROR "Lumen: select_profile '$fn' failed: $err"
+        return
+    }
+    if { $r eq "-1" } {
+        msg -ERROR "Lumen: favorite $n profile file '$fn' is missing"
+        return
+    }
+    catch { after cancel $fav_send_id }
+    set fav_send_id [after 1000 {
+        if { [catch {
+            save_settings
+            save_settings_to_de1
+        } err] } {
+            msg -ERROR "Lumen: could not send the machine settings: $err"
+        }
+    }]
+    msg -NOTICE "Lumen: favorite $n loaded profile '$fn'"
+}
+
+proc ::lumen::act::clear_favorites {} {
+    if { [dict size [::lumen::fav_slots]] == 0 } { return }
+    if { [catch {
+        unset -nocomplain ::settings(lumen_fav_profiles)
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not clear the favorite profiles: $err"
+        return
+    }
+    msg -NOTICE "Lumen: favorite profiles cleared"
 }
 
 # 0.47.0: Done is a plain page switch again. Until 0.46.1 a changed theme
@@ -5053,6 +5214,23 @@ proc ::lumen::build_home {} {
         tap $p $ix $L(bar_y) $L(bar_icon_w) $L(bar_h) $action $label
     }
 
+    # 0.53.0: the three favorite profile slots, digits in the data mono
+    # (the clock's face). Three stacked fixed-ink items per slot -- dim
+    # empty / plain set / accent active -- and one zone each; a tap on
+    # an empty slot stores the loaded profile, on a set slot loads it.
+    foreach fx $L(bar_fav_x) n {1 2 3} {
+        set fcx [expr {$fx + $L(bar_icon_w) / 2.0}]
+        foreach {code col} [list \
+            "\[::lumen::data::fav_empty $n\]"  $C(ink_3) \
+            "\[::lumen::data::fav_set $n\]"    $C(ink_2) \
+            "\[::lumen::data::fav_active $n\]" $C(crema)] {
+            var $p $fcx $bar_mid $code \
+                -font $L(font_data) -fill $col -anchor center -justify center
+        }
+        tap $p $fx $L(bar_y) $L(bar_icon_w) $L(bar_h) \
+            [list ::lumen::act::fav_tap $n] "Favorite $n"
+    }
+
     # 0.42.0: the Decent app slot -- a drawn icon, not a glyph, so it
     # sits outside the foreach. Same ink, same zone, one tap to the
     # stock settings (reversing 0.41.0's two-tap DECENT APP row).
@@ -6059,6 +6237,16 @@ proc ::lumen::build_settings {} {
         -font $L(font_title) -fill $C(ink) -anchor n -justify center
     var $p $L(center_x) 72 {[::lumen::data::version_line]} \
         -font $L(font_caption) -fill $C(ink_3) -anchor n -justify center
+
+    # 0.53.0: the favorite slots' one management control, a text link in
+    # the header (the page is baked and both columns are full). Blank,
+    # and its tap a no-op, while no slot is set.
+    var $p [expr {$L(set_favclr_x) + $L(set_favclr_w)}] \
+        [expr {$L(set_favclr_y) + $L(set_favclr_h) / 2.0}] \
+        {[::lumen::data::fav_clear_label]} \
+        -font $L(font_caption) -fill $C(crema) -anchor e -justify right
+    tap $p $L(set_favclr_x) $L(set_favclr_y) $L(set_favclr_w) $L(set_favclr_h) \
+        {::lumen::act::clear_favorites} "Clear favorite profiles" label
 
     ####################################################################
     #  Two columns:
