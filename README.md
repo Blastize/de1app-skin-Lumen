@@ -1,5 +1,41 @@
 # Lumen
 
+**A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
+Version 0.53.0 · a skin for the Decent DE1app · by Blastize
+
+![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, favorite profile slots on the taskbar](docs/home_custom_theme.png)
+
+**Home.** The recommended grind and how sure it is, the last shot, the shot graph, and the bean, grind, dose and yield for the next shot. Digits 1 2 3 on the taskbar are favorite profile slots: one tap loads the profile.
+
+![The default dark theme home screen](docs/screenshot.png)
+
+**Dark, the default.** Light and Custom are two taps away.
+
+![Grind Advisor's after-shot popup on Lumen's glass, in the theme's colours](docs/glass_popup.png)
+
+**Glass popups.** Grind Advisor's Shot analysis and Calibration Curve float on frosted glass over the live page, in your theme's own colours.
+
+![The custom theme picker: base, backdrop and accent swatches, presets and a live preview](docs/theme_picker.png)
+
+**Your own colours.** Dark or light base, a backdrop tint and an accent, six presets, and a preview painted from the home page itself. Every page switches at once.
+
+![The settings page: brew, steam, flush, hot water, theme, bags to cycle, clock and low water](docs/settings.png)
+
+**Settings.** Brew temperature, steam, flush, hot water, theme, how many recent bags the home strip cycles through, clock format, low-water warning.
+
+## Install
+
+Copy the folder to `de1plus/skins/Lumen/`, restart the app, pick **Lumen** under Settings > App > Skin. Built to work with Grind Advisor, DYE, Bean Scanner, Shot History Editor, Maintenance Tracker and SDB; each is optional.
+
+## Safety
+
+Lumen writes only the app's own settings through the app's own calls (temperatures, volumes, its theme and favorite slots). It never touches shot files or the shot database and never starts a flow on its own.
+
+<details>
+<summary><b>Full reference and version notes</b></summary>
+
+## Reference
+
 A glass dashboard skin for the Decent DE1, by Blastize.
 
 Lumen replaces the home screen with a dashboard: the current grind
@@ -110,8 +146,6 @@ before the number, an Estimate chip, and the source ("Starting estimate:
 same roaster (4 bags)") — instead of just `--`. It is display-only and
 disappears the moment the bag's first real shot produces a calibration.
 
-![The grind tile showing a starting estimate for a fresh bag](docs/screenshot_estimate.png)
-
 Since 0.30.0 the top of the screen is a **taskbar**: a live clock and date
 (12/24-hour and day-month/month-day formats, chosen on the settings CLOCK
 row), the water level, and mug / wrench / gear / DE1 / moon icons — Drink
@@ -131,8 +165,6 @@ background and the strip carries the bag cycler (0.18.0–0.23.x). The full
 story is in the CHANGELOG.
 
 ## The home screen
-
-![Lumen home screen](docs/screenshot.png)
 
 Everything above is one page: the grind recommendation with its method and
 confidence, the last shot's numbers, the full shot graph, and the next shot's
@@ -449,3 +481,5 @@ The stock settings, firmware, descale and profile-editor pages come from
 `skins/default/standard_includes.tcl` and are untouched; only its
 out-of-water page is re-declared by Lumen (0.44.0), keeping its tap
 commands verbatim.
+
+</details>
