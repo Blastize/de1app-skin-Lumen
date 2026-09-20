@@ -23,6 +23,14 @@ Version 0.53.0 · a skin for the Decent DE1app · by Blastize
 
 **Settings.** Brew temperature, steam, flush, hot water, theme, how many recent bags the home strip cycles through, clock format, low-water warning.
 
+![The home screen on a light custom theme: warm cream page, blue accent](docs/home_light_custom.png)
+
+**Light, in your colours.** The same home on a light base with a warm backdrop and a blue accent.
+
+![Grind Advisor's popup on the light theme's glass](docs/glass_popup_light.png)
+
+**Glass follows the theme.** The popup on the light theme: pale frosted glass, the page still visible around it.
+
 ## Install
 
 Copy the folder to `de1plus/skins/Lumen/`, restart the app, pick **Lumen** under Settings > App > Skin. Built to work with Grind Advisor, DYE, Bean Scanner, Shot History Editor, Maintenance Tracker and SDB; each is optional.
