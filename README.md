@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.53.0 · a skin for the Decent DE1app · by Blastize
+Version 0.56.1 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, favorite profile slots on the taskbar](docs/home_custom_theme.png)
 
@@ -9,7 +9,7 @@ Version 0.53.0 · a skin for the Decent DE1app · by Blastize
 
 ![The default dark theme home screen](docs/screenshot.png)
 
-**Dark, the default.** Light and Custom are two taps away.
+**Dark, the default.** Light, the presets and your own colours are behind the THEME row's Change button.
 
 ![Grind Advisor's after-shot popup on Lumen's glass, in the theme's colours](docs/glass_popup.png)
 
@@ -52,7 +52,19 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.53.0 — every page built, baked and running on the tablet.**
+**Version 0.56.0 — every page built, baked and running on the tablet.**
+
+New in 0.56.0: **Auto glass.** The colour picker's BASE row offers Dark,
+Light or Auto. With Auto, your own colours sit on light glass from one
+time of day and on dark glass from another (tap a time to step it by 30
+minutes; 07:00 and 19:00 to start), and Done draws both looks at once so
+the change of glass is instant. The flip happens on the home screen
+while the machine is idle, never mid-shot.
+
+New in 0.54.0: the THEME row's button reads **Change** and opens the
+colour picker, where Lumen dark and Lumen light sit among the presets;
+the old Dark → Light → Custom cycle is gone. The caption names the theme
+on screen.
 
 New in 0.52.0: **truer custom accents.** The accent colour is now kept
 readable on the tinted card it actually sits on (the hero number, Done,
@@ -395,8 +407,14 @@ Nothing in the cycler touches the database directly: the bag list and shot
 clock come from SDB's public read API, and the write goes through DYE's own
 `source_next_from`, the same path Bean Scanner uses.
 
-The **THEME** row on the Lumen settings page cycles it, and the change is
-on screen before your finger lifts (0.47.0). Every item a Lumen helper
+The **THEME** row's Change button opens the picker (0.54.0; until 0.53.1
+the button cycled the three), and tapping Done there puts the change on
+screen before your finger lifts (0.47.0). The picker's **Auto** base
+(0.56.0) puts your custom colours on light or dark glass by time of day:
+`lumen_custom_base` = auto with `lumen_auto_light_from` and
+`lumen_auto_dark_from` (minutes past midnight); both halves are drawn
+(`_custom` and `_customl` files) and a minute tick swaps them on the
+home or saver page while the machine is idle. Every item a Lumen helper
 draws carries a role tag naming the palette token it took its colour from
 (`lumen_c_ink`, `lumen_o_glass_brd`, ...), so a theme is one
 `itemconfigure` per token; the page backgrounds swap their photo through
