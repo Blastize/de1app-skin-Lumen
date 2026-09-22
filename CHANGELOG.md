@@ -4,6 +4,26 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.57.0 - taskbar re-layout: sleep far left, profile names in the slots, halo on the active one (pass 08) - verify.sh PASS 2026-09-22 18:30 on run 1 (home dump: three 180-wide slots, the loaded profile's slot carries the 176x48 halo photo, the other two the 1x1 blank; logcat clean; light glass eyeballed, dark on the painter render only -- owner checklist open)
+
+Base: 0.56.1. Owner's mockup: the moon (Sleep) moves ALONE to the far left
+so a stray tap near the corner no longer sleeps the machine; the date sits
+under the time with the water reading beside it; mug / wrench / gear / DE1
+close up to the right edge; the "Lumen" wordmark is gone. The three
+favorite slots widen to 180 and show their PROFILE NAMES, centred and
+ellipsis-cut to the slot (measured in the caption font, memoised): a dim
+mono `+` when empty, the icons' grey when set, crema when active -- over a
+soft crema HALO, one runtime alpha PNG (`custom::halo_png`, the 0.49.0
+encoder) swapped into the slot's image item by the 200 ms accessor, so it
+follows a profile change from anywhere within a tick; `apply_theme`
+repaints it from the new crema.
+**Safety status: no write path changed. `lumen_fav_profiles` is written
+exactly as in 0.53.0 (empty-slot tap, settings Clear); a set-slot tap still
+calls the core's `select_profile`. No file, database or history is touched.**
+
+Files: skin.tcl, tools/check_skin.tcl (bar geometry rewritten; 0.57.0 section
+rebuilds the home page under the photo stub), docs; passes/Lumen/pass_08.*.
+
 ## 0.56.1 - polish: the grind and last-shot tile footers share one row (2026-09-22) - TABLET-VERIFIED 16:45 (headless harness PASSED, home screenshot: both footers at the same row, logcat clean)
 
 Base: 0.56.0. Owner spotted on the home page that "Fair - 6 shots / Curve /
