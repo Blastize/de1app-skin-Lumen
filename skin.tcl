@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.57.0  (taskbar re-layout: sleep far left, profile names in the slots, halo on the active one; see `variable version`)
+#  Version: 0.57.1  (polish: a lighter, quieter favorite halo, pale on light glass; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.57.0"
+    variable version "0.57.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -2219,7 +2219,18 @@ proc ::lumen::fav_glow_photo {} {
     if { $W <= 0 } { error "no screen size" }
     set sx [expr {$W / 1340.0}] ; set sy [expr {$H / 800.0}]
     if { [scan $C(crema) "#%2x%2x%2x" r g b] != 3 } { error "crema '$C(crema)' is not #rrggbb" }
-    set png [::lumen::custom::halo_png [list $r $g $b] 0.62 \
+    # 0.57.1 (owner: "very dark", then "lighter still"): quieter, 0.30
+    # inside instead of 0.62, and on LIGHT glass -- where the crema is a
+    # dark amber that painted a brown pill -- the tint is the crema lifted
+    # 60% toward white, so the halo reads as a pale glow behind the name.
+    # Light is read off the ground's luminance, so the custom theme's two
+    # halves sort themselves.
+    set a 0.30
+    if { [scan $C(bg) "#%2x%2x%2x" gr gg gb] == 3 \
+             && (0.2126 * $gr + 0.7152 * $gg + 0.0722 * $gb) / 255.0 > 0.45 } {
+        foreach v {r g b} { set $v [expr {int(round([set $v] + (255 - [set $v]) * 0.6))}] }
+    }
+    set png [::lumen::custom::halo_png [list $r $g $b] $a \
         [expr {int(round($L(bar_fav_glow_w) * $sx))}] [expr {int(round($L(bar_h) * $sy))}] \
         [expr {int(round($L(bar_fav_glow_soft) * $sy))}]]
     return [image create photo -data $png]

@@ -4,6 +4,15 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.57.1 - polish: a lighter, quieter favorite halo (2026-09-22)
+
+Base: 0.57.0. Owner, on the tablet (light glass): the halo was "very dark" --
+the light crema is a dark amber, so at 0.62 it painted a brown pill. The halo
+now sits at 0.30 (a 0.40 preview was still too much for the owner), and on
+light glass (ground luminance > 0.45, so the custom theme's halves sort
+themselves) its tint is the crema lifted 60% toward white.
+**Safety status: display only, no behaviour or write change.**
+
 ## 0.57.0 - taskbar re-layout: sleep far left, profile names in the slots, halo on the active one (pass 08) - verify.sh PASS 2026-09-22 18:30 on run 1 (home dump: three 180-wide slots, the loaded profile's slot carries the 176x48 halo photo, the other two the 1x1 blank; logcat clean; light glass eyeballed, dark on the painter render only -- owner checklist open)
 
 Base: 0.56.1. Owner's mockup: the moon (Sleep) moves ALONE to the far left
