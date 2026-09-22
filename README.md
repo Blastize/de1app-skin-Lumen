@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.57.2 · a skin for the Decent DE1app · by Blastize
+Version 0.57.3 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, favorite profile slots on the taskbar](docs/home_custom_theme.png)
 
@@ -61,7 +61,7 @@ at the right edge; the wordmark is gone. The three favorite slots now show
 their **profile names**, centred, cut with an ellipsis when long: a dim
 `+` is an empty slot, grey is a set one, and the loaded profile's slot
 reads in crema over a soft **halo** that follows the profile wherever it
-was chosen.
+was chosen. Tapping a slot moves the halo there the instant you touch it.
 
 New in 0.56.0: **Auto glass.** The colour picker's BASE row offers Dark,
 Light or Auto. With Auto, your own colours sit on light glass from one

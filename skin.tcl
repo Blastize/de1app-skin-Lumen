@@ -5,7 +5,7 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.57.2  (polish: the favorite halo tuned on the tablet, 0.36, half-lifted on light glass; see `variable version`)
+#  Version: 0.57.3  (favorite slots: no press flash, the halo answers the tap at once; see `variable version`)
 #
 #
 #
@@ -102,7 +102,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.57.2"
+    variable version "0.57.3"
 
     variable C        ;# colour tokens
     array set C {}
@@ -2208,6 +2208,24 @@ proc ::lumen::_fav_glow_sync { n on } {
     }
 }
 
+# 0.57.3 instant tap answer. _fav_light_now lights slot n (and only n)
+# and paints it straight away -- the press_flash precedent's `update
+# idletasks`, no event processing. _fav_refresh_now runs dui's own
+# on-screen variable pass for the page (which cancels and re-arms its own
+# 200 ms timer, as every page load does), so the slot inks and the halo
+# re-derive from the profile actually loaded, then paints.
+proc ::lumen::_fav_light_now { n } {
+    foreach k {1 2 3} { _fav_glow_sync $k [expr {$k == $n}] }
+    update idletasks
+}
+proc ::lumen::_fav_refresh_now {} {
+    if { [catch { dui page update_onscreen_variables } err] } {
+        msg -ERROR "Lumen: favorite slots not refreshed: $err"
+        return
+    }
+    update idletasks
+}
+
 # The halo photo for the CURRENT palette: bar_fav_glow_w x bar_h design
 # px at the screen's scale, crema, 0.62 inside the pill. Throws without
 # Tk or a screen size; the build then draws no halo and the active slot
@@ -3449,6 +3467,8 @@ proc ::lumen::act::fav_tap { n } {
             return
         }
         msg -NOTICE "Lumen: favorite $n set to '$fn'"
+        # 0.57.3: the slot's name and halo appear on the tap, not a tick later.
+        ::lumen::_fav_refresh_now
         return
     }
     lassign $slot fn title
@@ -3457,11 +3477,18 @@ proc ::lumen::act::fav_tap { n } {
         msg -NOTICE "Lumen: machine busy ($busy), favorite $n not loaded"
         return
     }
+    # 0.57.3: the halo moves to this slot and is PAINTED before the
+    # profile loads, so the tap answers at once; the refresh after the
+    # load brings the name inks along -- or, if the load failed, puts the
+    # halo back on whatever profile is really loaded.
+    ::lumen::_fav_light_now $n
     set r ""
     if { [catch { set r [::select_profile $fn] } err] } {
         msg -ERROR "Lumen: select_profile '$fn' failed: $err"
+        ::lumen::_fav_refresh_now
         return
     }
+    ::lumen::_fav_refresh_now
     if { $r eq "-1" } {
         msg -ERROR "Lumen: favorite $n profile file '$fn' is missing"
         return
@@ -5612,8 +5639,10 @@ proc ::lumen::build_home {} {
             var $p $fcx $bar_mid $code \
                 -font $font -fill $col -anchor center -justify center
         }
+        # 0.57.3: no press flash -- the halo itself is the tap's answer
+        # (style none still clears any previous flash).
         tap $p $fx $L(bar_y) $L(bar_fav_w) $L(bar_h) \
-            [list ::lumen::act::fav_tap $n] "Favorite $n"
+            [list ::lumen::act::fav_tap $n] "Favorite $n" none
     }
 
     # 0.42.0: the Decent app slot -- a drawn icon, not a glyph, so it

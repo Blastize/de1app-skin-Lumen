@@ -4,6 +4,20 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.57.3 - favorite slots answer the tap with the halo, no press flash (2026-09-22)
+
+Base: 0.57.2. Owner: drop the square tap highlight on the three slots and
+make the glow appear the instant the slot is tapped. The slot zones use
+press-flash style `none`. A set-slot tap lights and paints the halo on that
+slot BEFORE `select_profile` runs, then runs dui's own on-screen variable
+pass (it re-arms its own 200 ms timer) so the name inks follow at once; a
+failed load re-derives the halo from the profile really loaded, and a busy
+machine still refuses before anything lights. Storing an empty slot lights
+it on the same tap. Owner also confirmed 0.56.0 Auto flipped the glass by
+itself on the tablet.
+**Safety status: no write path changed; the tap loads the same profile
+through the same `select_profile` call as 0.53.0.**
+
 ## 0.57.2 - polish: the favorite halo tuned on the tablet (2026-09-22)
 
 Base: 0.57.1. Owner: "a bit darker". The halo sits at 0.36 inside (0.62 was
