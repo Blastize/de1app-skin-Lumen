@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.57.1 · a skin for the Decent DE1app · by Blastize
+Version 0.57.2 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, favorite profile slots on the taskbar](docs/home_custom_theme.png)
 

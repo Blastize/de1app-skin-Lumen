@@ -4,6 +4,13 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.57.2 - polish: the favorite halo tuned on the tablet (2026-09-22)
+
+Base: 0.57.1. Owner: "a bit darker". The halo sits at 0.36 inside (0.62 was
+brown, 0.30 too faint) and on light glass its tint is the crema lifted half
+way toward white (was 60%).
+**Safety status: display only, no behaviour or write change.**
+
 ## 0.57.1 - polish: a lighter, quieter favorite halo (2026-09-22)
 
 Base: 0.57.0. Owner, on the tablet (light glass): the halo was "very dark" --
