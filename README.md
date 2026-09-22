@@ -3,7 +3,7 @@
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
 Version 0.57.3 · a skin for the Decent DE1app · by Blastize
 
-![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, favorite profile slots on the taskbar](docs/home_custom_theme.png)
+![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
 **Home.** The recommended grind and how sure it is, the last shot, the shot graph, and the bean, grind, dose and yield for the next shot. The three profile names on the taskbar are favorite slots: one tap loads the profile, and the loaded one glows.
 
