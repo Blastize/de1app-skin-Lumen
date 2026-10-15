@@ -4,6 +4,30 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.62.2 - The bag cycler never sources a soft-deleted shot (pass 15, 2026-10-15) - TABLET-VERIFIED 17:41 (verify.sh PASS run 3)
+
+Verify: run 1 FAIL on checks authoring (the Write tool stored "U+F011" as a raw glyph; checks.py reads
+cp1252; fixed to ASCII). Run 2 FAIL: the GA 3.25.0 session's DevBridge ga_history probe opened GA pages mid-run
+(17:23:30; the two verify runs overlapped). Run 3 (owner-approved, tablet idle) PASS; code unchanged throughout.
+Base: 0.62.1. Patch, protocol lane. Tablet 2026-10-15: right from Bam Bam onto Hai Goji
+Hambela (newest shot 20261015T130540 in SHE trash) logged "set to Goji" and switched only the chart.
+- Cause: `_bag_clocks` took the bag's newest clock from `SDB::shots_using_category`, whose aliased V_shot
+  branch has no `removed=0`. DYE `source_next_from` found no file, re-applied its stale `src_shot` (the old
+  bag), saved and returned 1. Lumen logged the switch unconditionally.
+- `_bag_source {bag}` (replaces `_bag_clocks`): `SDB::shots clock 1` (removed=0) for the bag's newest live
+  real espresso (SQL skips cleaning / calibrate; the file must exist and pass `_shot_reject_reason`). Else
+  it takes the newest live file of any kind, so cleaning-only / short-only bags stay reachable. A missing
+  file logs "is gone, skipped".
+- `cycle_bag`: after DYE, rc must be 1 AND `current_bag` must equal the wanted bag (space-normalized;
+  SHE's post-check), or the tap ERRORs. "set to" now names the source file. The chart loads that same
+  file (fallback: the 0.43.0 resolver). Nothing loads on failure. End stops and catch-code-1 are unchanged.
+- Tests: pass_15_offline.tcl 17/17 with the real DYE/SDB procs (the 0.62.1 copy fails 14). A scratch
+  replay on the pulled shots.db shows 10 bags walked truthfully. The check_skin stub moved to `_bag_source`.
+
+**Safety status:** no new write and no write path changed. The bag tap still writes the next-shot plan
+only through DYE's `source_next_from`, and now does not report it unless it took. Reads: up to 12
+history files per tap; SDB through `shots` only (no SQL of Lumen's own, no database handle).
+
 ## 0.62.1 - Sleep is the power symbol; one copy style (F23 + F25, 2026-10-02) - TABLET-VERIFIED 17:54 (verify.sh PASS run 1)
 
 Base: 0.62.0 (on the tablet). Patch: one glyph and copy. Owner 2026-10-02: "go with F23 to F26 next".

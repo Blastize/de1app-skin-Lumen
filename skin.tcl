@@ -5,8 +5,8 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.62.1  (F23 one copy style: the real ellipsis and the middle
-#                    dot; F25 the taskbar's Sleep is the power symbol;
+#  Version: 0.62.2  (the bag cycler never sources a soft-deleted shot and
+#                    reports a switch only when DYE's plan really moved;
 #                    see `variable version`)
 #
 #
@@ -108,7 +108,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.62.1"
+    variable version "0.62.2"
 
     variable C        ;# colour tokens
     array set C {}
@@ -4885,8 +4885,8 @@ proc ::lumen::act::open_drinkmenu {} {
 #          branch that applies the removed=0 filter, and it avoids the
 #          lookup-table branch, which reads an undefined `lookup_order_by`
 #          (SDB.tcl:2723 -- its assignment is commented out at 2657).
-#   clock  ::plugins::SDB::shots_using_category bean_desc <value> clock
-#          Newest first, so [lindex ... 0] is that bag's most recent shot.
+#   source ::lumen::act::_bag_source <bag> (0.62.2, below): the bag's newest
+#          LIVE shot file, through ::plugins::SDB::shots.
 #   apply  ::plugins::DYE::shots::source_next_from <clock> {} beans
 #          "beans" is resolved by DYE through
 #          `metadata fields -domain shot -section beans`, so it copies the
@@ -4895,40 +4895,69 @@ proc ::lumen::act::open_drinkmenu {} {
 #
 # Every call is guarded: with SDB or DYE missing this logs and does nothing
 # rather than throwing inside a button handler.
-# The shot clocks for one bag, newest first.
 #
-# WORKAROUND for a real defect in SDB, hit on the tablet in 0.21.0: for
-# bean_desc the data dictionary gives db_table = V_shot rather than "shot", so
-# shots_using_category takes its aliased branch and builds
+# The shot a cycled bag is sourced from (0.62.2): {clock path real}, or {}
+# when no file of the bag is left on disk.
 #
-#   SELECT DISTINCT clock FROM V_shot t INNER JOIN V_shot s ON t.clock=s.clock
+# Up to 0.62.1 this was the bag's newest clock from
+# SDB::shots_using_category bean_desc <bag> t.clock. That query's aliased
+# V_shot branch has no removed=0 filter (the plain `shot` branch has one),
+# so once the bag's newest shot was soft-deleted in the Shot History
+# Editor, the dead clock came first. DYE's source_next_from then found no
+# file, re-applied the shot it had loaded before (the bag you were on),
+# saved and returned 1. The chart switched and the plan did not (Hai Goji
+# Hambela on the tablet, 2026-10-15).
 #
-# where the bare `clock` is ambiguous across both aliases. SQLite rejects it
-# with "ambiguous column name: clock" and the cycler could never resolve a
-# clock. Qualifying it as t.clock through the documented `return_what`
-# parameter produces valid SQL and the ordering SDB already intends
-# (ORDER BY t.clock DESC).
-#
-# Both spellings are tried, qualified first: t.clock is correct for the
-# aliased branch that bean_desc actually takes, and the bare form is the right
-# one if a future SDB maps bean_desc onto the plain `shot` table, where there
-# is no `t` to qualify. Neither is assumed to work.
-proc ::lumen::act::_bag_clocks { bag } {
-    foreach form {t.clock clock} {
-        if { ![catch {
-            set c [::plugins::SDB::shots_using_category bean_desc $bag $form]
-        } err] } {
-            if { [llength $c] > 0 } { return $c }
-        } else {
-            msg -DEBUG "Lumen: bag clock lookup via '$form' failed: $err"
+# Now through SDB::shots, whose exc_removed 1 adds removed=0, with each
+# clock checked against its own file before it is used (the app's
+# clock -> filename rule, as last_shot_candidates):
+#   1. the bag's newest live REAL espresso: cleaning / calibrate rows are
+#      skipped in SQL, the file must exist and pass _shot_reject_reason
+#      (the 0.43.0 test the chart uses). real = 1.
+#   2. else the bag's newest live file of any kind, so a bag holding only
+#      cleaning runs or short shots stays reachable and never blocks the
+#      walk to the older bags behind it. Its bean fields are the bag's, so
+#      the plan comes from it; the chart does not (real = 0).
+# Read only: SDB's public read API plus reads of history/ files.
+proc ::lumen::act::_bag_source { bag } {
+    if { [info procs ::plugins::SDB::shots] eq "" \
+      || [info procs ::plugins::SDB::string2sql] eq "" } {
+        error "the SDB plugin has no shot query"
+    }
+    set dir "[homedir]/history"
+    set bagf "bean_desc=[::plugins::SDB::string2sql $bag]"
+    set bev "COALESCE(beverage_type,'') NOT IN ('cleaning','calibrate')"
+    set gone {}
+    foreach {filter real} [list "$bagf AND $bev" 1 $bagf 0] {
+        foreach c [::plugins::SDB::shots clock 1 $filter 12 "clock DESC"] {
+            if { ![string is integer -strict $c] } { continue }
+            set f "$dir/[clock format $c -format %Y%m%dT%H%M%S].shot"
+            if { $f in $gone } { continue }
+            if { ![file isfile $f] } {
+                msg -NOTICE "Lumen: bag '$bag': [file tail $f] is gone, skipped"
+                lappend gone $f
+                continue
+            }
+            if { !$real } { return [list $c $f 0] }
+            if { [catch {
+                array set props [encoding convertfrom utf-8 [read_binary_file $f]]
+            } err] } {
+                msg -NOTICE "Lumen: bag '$bag': could not read [file tail $f]: $err"
+                continue
+            }
+            set why [::lumen::_shot_reject_reason props]
+            array unset props
+            if { $why eq "" } { return [list $c $f 1] }
+            msg -INFO "Lumen: bag '$bag': skipping [file tail $f]: $why"
         }
     }
     return {}
 }
 
 # (0.43.0: _bag_last_shot_file is gone -- the cycler loads through
-# ::lumen::load_last_shot_curves with the bag name, the same resolver as
-# startup, so the bag's cleaning runs are skipped here too.)
+# ::lumen::load_last_shot_curves, so the bag's cleaning runs are skipped
+# here too. 0.62.2: with the file _bag_source chose when it is a real
+# espresso, else with the bag name, the same resolver as startup.)
 
 proc ::lumen::act::cycle_bag { dir } {
     # 0.61.0: the three early exits below are plain `return`s INSIDE the
@@ -4975,19 +5004,37 @@ proc ::lumen::act::cycle_bag { dir } {
         set want [lindex $bags $target]
         if { $want eq $cur } { return }
 
-        set clocks [_bag_clocks $want]
-        if { [llength $clocks] == 0 } {
-            error "no shots found for bag '$want'"
+        set src [_bag_source $want]
+        if { [llength $src] != 3 } {
+            error "no shot file left for bag '$want'"
         }
-        ::plugins::DYE::shots::source_next_from [lindex $clocks 0] {} beans
-        msg -INFO "Lumen: next shot bag set to '$want'"
+        lassign $src clk path real
+        set rc [::plugins::DYE::shots::source_next_from $clk {} beans]
+
+        # 0.62.2: DYE's answer alone proves nothing. Given a clock whose file
+        # is gone, it re-applies the shot it loaded before and still returns
+        # 1. The switch happened only if the plan now names the wanted bag:
+        # the Shot History Editor's post-check (ShotHistoryEditor.tcl ~5782),
+        # on the same string the dots compare.
+        regsub -all { +} [string trim $want] " " want_n
+        set got [::lumen::current_bag]
+        if { $rc ne "1" || $got ne $want_n } {
+            error "DYE did not switch the next shot to '$want' (it returned '$rc', the plan reads '$got')"
+        }
+        msg -INFO "Lumen: next shot bag set to '$want' from [file tail $path]"
 
         # 0.30.0 (owner request): the chart and LAST SHOT card follow the
-        # bag, like the grind tile has since 0.22.0. 0.43.0: through the
-        # shared resolver, so the bag's last REAL shot is what loads (a
-        # cleaning run recorded under this bag is skipped). Failure here
-        # must not undo the cycle itself, which has already succeeded.
-        if { [catch { ::lumen::load_last_shot_curves 1 "" $want } lerr] } {
+        # bag, like the grind tile has since 0.22.0. 0.62.2: from the very
+        # file the plan came from when it is a real espresso; when the bag
+        # only has cleaning runs or short shots, through the 0.43.0 resolver,
+        # which never puts those on the chart. Failure here must not undo
+        # the cycle itself, which has already succeeded.
+        if { $real } {
+            set lcmd [list ::lumen::load_last_shot_curves 1 $path]
+        } else {
+            set lcmd [list ::lumen::load_last_shot_curves 1 "" $want]
+        }
+        if { [catch $lcmd lerr] } {
             msg -ERROR "Lumen: could not load '$want' last shot: $lerr"
         }
     } err] == 1 } {
