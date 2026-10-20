@@ -5,8 +5,8 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.63.0  (the starting estimate follows GrindAdvisor's grinder
-#                    recalibration log and shows its likely range;
+#  Version: 0.63.1  (the starting estimate also follows the bag's notes,
+#                    GrindAdvisor 3.28.0's same-origin source;
 #                    see `variable version`)
 #
 #
@@ -108,7 +108,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.63.0"
+    variable version "0.63.1"
 
     variable C        ;# colour tokens
     array set C {}
@@ -1447,6 +1447,15 @@ proc ::lumen::data::_g { rec key {default ""} } {
 # until the bag changed or the app restarted. The cache now holds the log
 # it was computed under too (_recal_sig: a variable read, never SDB), so
 # the first tick after a Save or Remove makes the one SDB read again.
+#
+# 0.63.1: GrindAdvisor 3.28.0 also reads the loaded bag's notes
+# (::settings(bean_notes)): a country there ("Ethiopia") can start a new
+# bag from the owner's bags of that origin. The notes are not in the bag
+# key, so notes typed after the bean name kept the pre-notes start on the
+# tile while GrindAdvisor's popup (it recomputes on open) had the new one.
+# The signature now holds the notes too (_notes_sig, again one variable
+# read): one SDB read per notes edit, none while they stay the same. Not
+# the estimate's `origin` key -- that is only known after the call.
 namespace eval ::lumen::data {
     variable est_key ""
     variable est_sig ""
@@ -1463,6 +1472,13 @@ proc ::lumen::data::_recal_sig {} {
     return "=$::plugins::GrindAdvisor::settings(grinder_recal)"
 }
 
+# The loaded bag's notes as GrindAdvisor reads them (its
+# _current_bean_notes), in _recal_sig's form: "-" unset, else "=" + text.
+proc ::lumen::data::_notes_sig {} {
+    if { ![info exists ::settings(bean_notes)] } { return "-" }
+    return "=$::settings(bean_notes)"
+}
+
 # {estimate note}: the estimate dict or {}, and -- only when it is {} --
 # GrindAdvisor 3.26.0's starting_estimate_note ("" unless a recalibration
 # of unknown size left no start). The note is the plugin's state after
@@ -1477,7 +1493,7 @@ proc ::lumen::data::_est {} {
     if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {{} {}} }
     if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {{} {}} }
     if { $ck eq "" } { return {{} {}} }
-    set sig [_recal_sig]
+    set sig [list [_recal_sig] [_notes_sig]]
     if { $ck eq $est_key && $sig eq $est_sig } { return [list $est_val $est_note] }
     set est_key $ck
     set est_sig $sig

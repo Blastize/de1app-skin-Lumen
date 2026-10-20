@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.63.0 · a skin for the Decent DE1app · by Blastize
+Version 0.63.1 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,18 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.63.0 — every page built, baked and running on the tablet.**
+**Version 0.63.1 — every page built, baked and running on the tablet.**
 
-New in 0.63.0: **a new bag's starting estimate follows a grinder
+New in 0.63.1: **a new bag's starting estimate follows its notes.** Grind
+Advisor 3.28.0 can start a new bag from your bags of the same origin when
+the bag's notes name its country ("Ethiopia"). If you typed the bean name
+first and the notes after, the grind tile kept the start it had worked out
+without the notes until the bag changed, while Grind Advisor's popup
+already had the new one. The tile now picks up a notes change on the next
+screen refresh, so it and the popup show the same start, range and source
+(for example "same origin (Ethiopia, 3 bags)").
+
+Earlier, 0.63.0: **a new bag's starting estimate follows a grinder
 recalibration, and shows its likely range.** Grind Advisor 3.26.0 keeps a
 log of grinder recalibrations (Advanced > Shot data > Grinder recalibrated)
 and puts every older bag on today's dial before it suggests where a new bag

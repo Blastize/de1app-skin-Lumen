@@ -4,6 +4,23 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.63.1 - The starting estimate follows the bag's notes (pass 17, 2026-10-16) - TABLET-VERIFIED 13:34 (verify.sh PASS run 1)
+
+Base: 0.63.0 (on the tablet). Patch, protocol lane (the estimate cache on the 200 ms tick). For GrindAdvisor
+3.28.0, whose same-origin rung reads the loaded bag's country from its bean name AND ::settings(bean_notes).
+- Fix: the cache key (bag key + `_recal_sig`) ignored the notes, so notes typed after the bean name kept the
+  pre-notes "Start ~X" (e.g. "this profile (6 bags)") until the bag changed; GA's popup, which recomputes on
+  open, had the same-origin start. New `_notes_sig` ("-" unset, else "=" + the notes; one variable read) joins
+  the signature: `_est` compares {recal notes}. One starting_estimate per notes edit, none while unchanged.
+  GA's `origin` key was not used: it only exists after the call. Display procs untouched.
+- Tests: pass_17_offline.tcl 18/18 against the REAL GrindAdvisor 3.28.0 and its fixture (0.63.0 fails 7,
+  P17-NOTES among them: "~10.2" stays after "Ethiopia"). check_skin H gains 4 notes-cache pins.
+- Measured (Inter 16 +3%): "Likely 11.7 to 14.3 . same origin (Ethiopia, 3 bags)" 376 of 400 px, whole;
+  long countries with two-digit grinds (El Salvador, Costa Rica: 401-422 px) end in an ellipsis.
+
+**Safety status:** no new write and no write path changed. Reads: one more variable on the tick
+(::settings(bean_notes), read only); starting_estimate still once per bag key, recal log or notes change.
+
 ## 0.63.0 - The starting estimate follows GrindAdvisor's recalibration log and shows its range (pass 16, 2026-10-15) - TABLET-VERIFIED 23:19 (verify.sh PASS run 1)
 
 Base: 0.62.2 (on the tablet). Minor, protocol lane (the estimate cache on the 200 ms tick). For GrindAdvisor
