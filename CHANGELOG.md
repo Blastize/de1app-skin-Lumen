@@ -4,6 +4,26 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.6 - No sunrise lookup on a picker visit without Auto in use; DYE must really have run; plugin errors on the tick logged once (pass 24, 2026-10-21) - TABLET-VERIFIED 03:44 (verify.sh PASS run 1)
+
+Base: 0.64.5 (52c0307). Patch, protocol lane. The parent session's review of 0.64.4.
+- Sun: `auto_wanted` asks `sun::ensure` only while Auto is the active theme (`sun::_auto_active`: theme custom and saved
+  base auto, read directly; prefs would loop). A Dark / Light user with a saved Auto set no longer runs getprop on a
+  picker visit; the Auto pill (`theme_pick`) and Done on an Auto base (`theme_apply`, before the signature) do.
+- DYE: `data::dye_live` = `plugin_on DYE` and DYE's `open` proc exists (a desktop core loads an enabled plugin's
+  settings without sourcing it). `_dye` and the grind / dose steppers' next_* writes need it.
+- Tick: GA / MT failures on the 200 ms tick (rec, bag key, "is it current", status) are logged once per distinct
+  message (`_tick_err`), again after a recovery; was five a second, or swallowed. Handed-over values are tested with
+  `_is_dict`, which puts errorInfo back (a compiled `string is list` on junk leaves it set); MT's run status,
+  run_restore and Lumen's favorite slots use it too. GA's and MT's `ok` are `string is true -strict` (a non-boolean `ok` raised on the tick).
+- Docs: `plugins loaded` stays 1 for a plugin switched off in Extensions until the restart (the plugin keeps running
+  and Lumen follows it); a not-enabled plugin's button only logs. 0.64.4 entry: safety line, "fails 9".
+- Tests: pass_24_offline 15/15 (the 0.64.5 copy fails 10); pass_15 / 21 / 22 adapted; the whole headless chain.
+  Tablet (every plugin on, saved set Auto): log as 0.64.5 (sun looked up at boot, Auto in force), home unchanged.
+
+**Safety status:** no write behaviour added. DYE's staged next_grinder_setting / next_grinder_dose_weight are written
+only when DYE is enabled and its code ran (fewer writes than 0.64.5); everything else as 0.64.5.
+
 ## 0.64.5 - The cleaning banner says when Maintenance Tracker refuses its tap (pass 23, 2026-10-21) - TABLET-VERIFIED 03:25 (verify.sh PASS run 1)
 
 Base: 0.64.4 (139a7dc). Patch, protocol lane. Reads MT 0.33.2's run_status outcome / reason / at; older MT unchanged.
@@ -32,12 +52,14 @@ cleaning-banner-guards session (folded in at its suggestion; it made no edit).
 - Cleaning banner: MT not enabled = no run (no MT call on the 200 ms tick, so no dirty errorInfo; the tap never loads a
   profile). An armed back_at that has passed (MT 0.33.0 / 0.33.1, both paths) shows "comes back after the run . Tap ...";
   profile_filename is an `info exists` test.
-- The sunrise lookup moved from `auto_bounds` to `auto_wanted`: a picker visit on a non-Auto base looks nothing up.
+- The sunrise lookup moved from `auto_bounds` to `auto_wanted`: a picker visit on a non-Auto base looks nothing up
+  (a Dark / Light user whose saved set is Auto still looked it up; fixed in 0.64.6).
 - SDB enabled mid-session: the next bag-list read attaches its save hook (once). 0.64.1's CHANGELOG time is ~01:02.
-- Tests: pass_22_offline 13/13 (0.64.3 fails 10); pass_13/15/16/17/20 and check_skin adapted (plugin_on, future times).
+- Tests: pass_22_offline 13/13 (0.64.3 fails 9); pass_13/15/16/17/20 and check_skin adapted (plugin_on, future times).
   Tablet (every plugin on): log as 0.64.3, no "not loaded"; home and settings identical bar the version and the clock.
 
-**Safety status:** no write behaviour added or changed; fewer calls (none into a plugin that is not enabled).
+**Safety status:** no write behaviour added; fewer calls (none into a plugin that is not enabled) and fewer writes:
+the grind / dose steppers write DYE's staged next_* values only while DYE is enabled.
 
 ## 0.64.3 - Safety notes say who writes what (2026-10-21) - TABLET-VERIFIED 02:28 (verify.sh PASS run 1)
 

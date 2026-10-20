@@ -6,8 +6,9 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.5  (the cleaning banner shows Maintenance Tracker's
-#                    refused switch-back after a tap; see `variable version`)
+#  Version: 0.64.6  (no sunrise lookup on a picker visit without Auto in
+#                    use; DYE must really have run; plugin errors on the tick
+#                    logged once; see `variable version`)
 #
 #
 #
@@ -120,7 +121,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.5"
+    variable version "0.64.6"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -1468,14 +1469,14 @@ proc ::lumen::data::grind_rec {} {
     if { ![::lumen::plugin_on GrindAdvisor] } { return {} }
     if { [info procs ::plugins::GrindAdvisor::recommendation_for_current_bag] ne "" } {
         if { ![catch { set rec [::plugins::GrindAdvisor::recommendation_for_current_bag] } err] } {
+            _tick_err "could not get the recommendation for this bag" ""
             if { $rec eq "" } { return {} }
-            if { ![catch { dict size $rec }] \
-              && [dict exists $rec ok] && [dict get $rec ok] } {
+            if { [_is_dict $rec] && [dict exists $rec ok] && [string is true -strict [dict get $rec ok]] } {
                 return $rec
             }
             return {}
         }
-        msg -ERROR "Lumen: could not get the recommendation for this bag: $err"
+        _tick_err "could not get the recommendation for this bag" $err
     }
 
     # Fallbacks for older Grind Advisor builds, in descending order of
@@ -1484,15 +1485,47 @@ proc ::lumen::data::grind_rec {} {
     if { ![info exists ::plugins::GrindAdvisor::last_recommendation] } { return {} }
     set rec $::plugins::GrindAdvisor::last_recommendation
     if { $rec eq "" } { return {} }
-    if { [catch { dict size $rec }] } { return {} }
-    if { ![dict exists $rec ok] || ![dict get $rec ok] } { return {} }
+    if { ![_is_dict $rec] } { return {} }
+    if { ![dict exists $rec ok] || ![string is true -strict [dict get $rec ok]] } { return {} }
     if { [info procs ::plugins::GrindAdvisor::last_recommendation_is_current] ne "" } {
-        if { [catch { set cur [::plugins::GrindAdvisor::last_recommendation_is_current] }] } {
+        if { [catch { set cur [::plugins::GrindAdvisor::last_recommendation_is_current] } err] } {
+            _tick_err "could not ask Grind Advisor whether its saved recommendation is current" $err
             return $rec
         }
-        if { !$cur } { return {} }
+        _tick_err "could not ask Grind Advisor whether its saved recommendation is current" ""
+        if { [string is false -strict $cur] } { return {} }
     }
     return $rec
+}
+
+# 0.64.6: a value another plugin handed over is a usable dict -- tested,
+# not caught (`catch { dict size }` on junk left errorInfo dirty, on the
+# 200 ms tick). Compiled inside a proc, Tcl 8.6's `string is list` on a
+# non-list ALSO leaves errorInfo set, so the two globals are put back.
+proc ::lumen::data::_is_dict { v } {
+    set keep {}
+    foreach g {errorInfo errorCode} {
+        if { [info exists ::$g] } { lappend keep $g [set ::$g] }
+    }
+    set ok [expr {[string is list $v] && [llength $v] % 2 == 0}]
+    foreach {g val} $keep { set ::$g $val }
+    return $ok
+}
+
+# 0.64.6: an error from another plugin on the 200 ms tick, logged ONCE per
+# distinct message (a failing call used to log five times a second, or --
+# the bare catches -- never); "" forgets it once the call works again, so a
+# later failure is logged afresh. `what` is the message's fixed part.
+proc ::lumen::data::_tick_err { what err } {
+    variable tick_errs
+    if { ![info exists tick_errs] } { set tick_errs [dict create] }
+    if { $err eq "" } {
+        if { [dict exists $tick_errs $what] } { dict unset tick_errs $what }
+        return
+    }
+    if { [dict exists $tick_errs $what] && [dict get $tick_errs $what] eq $err } { return }
+    dict set tick_errs $what $err
+    msg -ERROR "Lumen: $what: $err"
 }
 
 proc ::lumen::data::_g { rec key {default ""} } {
@@ -1575,7 +1608,11 @@ proc ::lumen::data::_est {} {
     if { ![::lumen::plugin_on GrindAdvisor] } { return {{} {}} }
     if { [info procs ::plugins::GrindAdvisor::starting_estimate] eq "" } { return {{} {}} }
     if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {{} {}} }
-    if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {{} {}} }
+    if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] } err] } {
+        _tick_err "could not read Grind Advisor's bag key" $err
+        return {{} {}}
+    }
+    _tick_err "could not read Grind Advisor's bag key" ""
     if { $ck eq "" } { return {{} {}} }
     set sig [list [_recal_sig] [_notes_sig]]
     if { $ck eq $est_key && $sig eq $est_sig } { return [list $est_val $est_note] }
@@ -1587,7 +1624,7 @@ proc ::lumen::data::_est {} {
         msg -ERROR "Lumen: starting_estimate failed: $err"
         return {{} {}}
     }
-    if { $e ne "" && ![catch { dict size $e }] \
+    if { $e ne "" && [_is_dict $e] \
       && [dict exists $e grind] && [dict exists $e label] \
       && [dict exists $e reason] } {
         set est_val $e
@@ -1917,9 +1954,18 @@ proc ::lumen::data::last_ratio_note {} {
 # back to the core ::settings. We do the same, so the strip still works with
 # DYE disabled. 0.64.4: "disabled" includes installed-but-off -- the core
 # peeks DYE and loads its saved settings, so stale next_* values exist then.
+# 0.64.6: and "loaded" without DYE's code: on a desktop core peek never
+# sources DYE (Android / undroid only) but still loads its settings, and an
+# enabled DYE then counts as loaded. dye_live needs both.
+
+# DYE is enabled AND its code ran (DYE's public open proc exists).
+proc ::lumen::data::dye_live {} {
+    if { ![::lumen::plugin_on DYE] } { return 0 }
+    return [expr {[info procs ::plugins::DYE::open] ne ""}]
+}
 
 proc ::lumen::data::_dye { field } {
-    if { ![::lumen::plugin_on DYE] } { return "" }
+    if { ![dye_live] } { return "" }
     if { ![info exists ::plugins::DYE::settings(next_$field)] } { return "" }
     return [string trim [set ::plugins::DYE::settings(next_$field)]]
 }
@@ -2562,7 +2608,7 @@ proc ::lumen::data::water_ml_low {} {
 # value reads as "no favorites", never as an error.
 proc ::lumen::fav_slots {} {
     set d [::lumen::data::_s ::settings(lumen_fav_profiles)]
-    if { $d eq "" || [catch { dict size $d }] } { return {} }
+    if { $d eq "" || ![::lumen::data::_is_dict $d] } { return {} }
     set out [dict create]
     foreach n {1 2 3} {
         if { ![dict exists $d $n] } { continue }
@@ -2945,10 +2991,11 @@ proc ::lumen::sun::resolve {} {
 
 # 0.64.2 (de1app PR #369 review, point 4): the position is only looked up
 # for the Auto theme -- once per session, the first time its schedule is
-# needed (0.64.4: from auto_wanted, whose callers all have an Auto base: an
-# Auto boot, the Auto pill, an Auto set's flip). A Dark / Light / fixed
-# custom user never runs getprop or touches the location service, picker
-# visits included (its schedule line then shows the fixed times).
+# needed (0.64.6: auto_wanted while Auto is the active theme -- an Auto boot,
+# an Auto set's flip -- plus the picker's Auto pill and its Done on an Auto
+# base). A Dark / Light / fixed custom user never runs getprop or touches the
+# location service, picker visits included, even with a saved Auto set (the
+# schedule line then shows the fixed times until Auto is tapped).
 proc ::lumen::sun::ensure {} {
     variable asked
     if { $asked } { return }
@@ -2956,6 +3003,15 @@ proc ::lumen::sun::ensure {} {
     if { [catch { resolve } err] } {
         msg -ERROR "Lumen: sun times: $err"
     }
+}
+
+# 0.64.6: is Auto the theme on screen? Read straight from the theme mode and
+# the saved base -- not through custom::prefs, which calls auto_wanted for
+# an Auto base, which asks this (a loop).
+proc ::lumen::sun::_auto_active {} {
+    if { $::lumen::theme_mode ne "custom" } { return 0 }
+    if { ![info exists ::settings(lumen_custom_base)] } { return 0 }
+    return [expr {$::settings(lumen_custom_base) eq "auto"}]
 }
 
 # Boot: resolve now only when the theme in force is Auto (its first palette
@@ -3061,11 +3117,13 @@ proc ::lumen::auto_bounds {} {
 # all day. scan, not expr, on the clock fields: "08" is not octal.
 # 0.59.0: the two times come from auto_bounds (sunrise / sunset).
 proc ::lumen::auto_wanted { {now ""} } {
-    # 0.64.4: the one place the sunrise / sunset lookup is asked for --
-    # every caller has an Auto base (prefs, signature, auto_check). The
-    # picker's schedule line reads auto_bounds without it, so a non-Auto
-    # visit shows the fixed times and looks nothing up.
-    ::lumen::sun::ensure
+    # 0.64.4 / 0.64.6: the sunrise / sunset lookup is asked for here only
+    # while Auto is the ACTIVE theme. A Dark / Light user whose saved custom
+    # set has an Auto base also reaches this (custom::prefs computes the
+    # set's half for the THEME row and the picker), and must not run getprop
+    # or the location service; the picker asks explicitly when Auto is
+    # tapped or applied (act::theme_pick, act::theme_apply).
+    if { [::lumen::sun::_auto_active] } { ::lumen::sun::ensure }
     if { $now eq "" } {
         set s [clock seconds]
         set now [expr {[scan [clock format $s -format %H] %d] * 60 + [scan [clock format $s -format %M] %d]}]
@@ -3317,11 +3375,12 @@ proc ::lumen::data::maint_state {} {
     if { ![::lumen::plugin_on MaintenanceTracker] } { return "" }
     if { [info procs ::plugins::MaintenanceTracker::status_summary] eq "" } { return "" }
     if { [catch { set s [::plugins::MaintenanceTracker::status_summary] } err] } {
-        msg -ERROR "Lumen: could not read the maintenance status: $err"
+        _tick_err "could not read the maintenance status" $err
         return ""
     }
-    if { $s eq "" || [catch { dict size $s }] } { return "" }
-    if { ![dict exists $s ok] || ![dict get $s ok] } { return "" }
+    _tick_err "could not read the maintenance status" ""
+    if { $s eq "" || ![_is_dict $s] } { return "" }
+    if { ![dict exists $s ok] || ![string is true -strict [dict get $s ok]] } { return "" }
     if { ![dict exists $s state] } { return "" }
     set st [dict get $s state]
     if { $st in {amber red} } { return $st }
@@ -3384,7 +3443,7 @@ proc ::lumen::data::mt_run {} {
     if { [info procs ::plugins::MaintenanceTracker::run_status] ne "" } { return [_mt_run_status] }
     if { ![info exists ::plugins::MaintenanceTracker::settings(run_restore)] } { return "" }
     set rr $::plugins::MaintenanceTracker::settings(run_restore)
-    if { ![string is list $rr] || [llength $rr] % 2 != 0 } { return "" }
+    if { ![_is_dict $rr] } { return "" }
     foreach k {prev_title clean_fn ts} { if { ![dict exists $rr $k] } { return "" } }
     set cur ""
     if { [info exists ::settings(profile_filename)] } { set cur [string trim $::settings(profile_filename)] }
@@ -3453,7 +3512,7 @@ proc ::lumen::data::_mt_status {} {
         return ""
     }
     set mt_status_err ""
-    if { ![string is list $d] || [llength $d] % 2 != 0 || ![dict exists $d state] } { return "" }
+    if { ![_is_dict $d] || ![dict exists $d state] } { return "" }
     return $d
 }
 
@@ -4977,7 +5036,7 @@ proc ::lumen::act::adjust_grind { delta } {
     if { $new < 0 } { set new 0 } elseif { $new > 100 } { set new 100 }
     set new [format %.1f $new]
     if { [catch {
-        if { [::lumen::plugin_on DYE] && [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
+        if { [::lumen::data::dye_live] && [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
             set ::plugins::DYE::settings(next_grinder_setting) $new
             plugins save_settings DYE
         }
@@ -5191,7 +5250,7 @@ proc ::lumen::act::adjust_dose { delta } {
     if { $new < 2 } { set new 2 } elseif { $new > 40 } { set new 40 }
     set new [format %.1f $new]
     if { [catch {
-        if { [::lumen::plugin_on DYE] && [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
+        if { [::lumen::data::dye_live] && [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
             set ::plugins::DYE::settings(next_grinder_dose_weight) $new
             plugins save_settings DYE
         }
@@ -8410,6 +8469,10 @@ proc ::lumen::act::open_theme_picker {} {
 # (bh -> bs, ah -> as).
 proc ::lumen::act::theme_pick { key value {sat ""} } {
     variable ::lumen::custom::pend
+    # 0.64.6: tapping Auto is the user asking for the schedule: look up
+    # sunrise / sunset now (once per session) so the preview shows the half
+    # the sun wants, not the fixed fallback times.
+    if { $key eq "base" && $value eq "auto" } { ::lumen::sun::ensure }
     set pend($key) $value
     if { $sat ne "" && $key in {bh ah} } { set pend([string index $key 0]s) $sat }
     ::lumen::refresh_preview
@@ -8439,6 +8502,9 @@ proc ::lumen::act::theme_cancel {} {
 # during which nothing else moves), and names the failure if it fails.
 proc ::lumen::act::theme_apply {} {
     variable ::lumen::custom::pend
+    # 0.64.6: Done on an Auto base -- the bake must pick the half the sun
+    # wants, so the position is looked up first (no-op once known).
+    if { $pend(base) eq "auto" } { ::lumen::sun::ensure }
     set before [::lumen::custom::signature [::lumen::custom::prefs]]
     if { [catch {
         set ::settings(lumen_custom_base) $pend(base)

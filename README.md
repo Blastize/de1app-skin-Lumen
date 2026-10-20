@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.5 · a skin for the Decent DE1app · by Blastize
+Version 0.64.6 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,19 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.5 — every page built, baked and running on the tablet.**
+**Version 0.64.6 — every page built, baked and running on the tablet.**
 
-New in 0.64.5: **the cleaning banner says when the switch-back is
+New in 0.64.6: **quieter with the plugins and the Auto theme.** If you
+use Dark or Light and your saved custom colours are an Auto set, opening
+the theme picker no longer looks up sunrise and sunset; that happens only
+when you tap Auto, or press Done on an Auto set. DYE's next-shot values
+count only once DYE has really started, so values it left behind are
+never shown or changed. If Grind Advisor or Maintenance Tracker fails
+while the home screen asks it for the grind tile or the maintenance dot,
+the log now says so once (it used to say so five times a second, or not
+at all), and an answer Lumen cannot read is simply ignored.
+
+Earlier, 0.64.5: **the cleaning banner says when the switch-back is
 refused.** With Maintenance Tracker 0.33.2 or newer, a tap on the banner
 that Maintenance Tracker turns down — the profile has unsaved changes,
 say, or the machine stayed busy for ten minutes — no longer looks like
@@ -74,11 +84,13 @@ turned on, so "installed" is not "running". Lumen now asks the app whether
 each plugin is actually on before it talks to it: Grind Advisor's tile and
 estimate, Maintenance Tracker's dot and cleaning banner, DYE's next-shot
 values, Bean Scanner, Shot History Editor and Drink Menu. A plugin that is
-off shows nothing on Lumen, and its button just says it is not loaded. The
+off when the app starts shows nothing on Lumen, and tapping its button
+does nothing (the app's log says it is not loaded). One you switch off in
+Extensions keeps running until the app restarts, and Lumen follows it. The
 cleaning banner never names a switch-back time that has already passed, and
 its tap does nothing while Maintenance Tracker is off. Opening the theme
-picker on a Dark or Light set no longer looks up sunrise and sunset (the
-schedule line shows the fixed times until you pick Auto). And if you turn
+picker with a Dark or Light set saved no longer looks up sunrise and
+sunset (with an Auto set saved it still did until 0.64.6). And if you turn
 SDB on while the app runs, the bag dots follow its next shot save without a
 restart.
 
