@@ -6,14 +6,18 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.63.2  (filelist.txt for the de1app build; Noto Sans Mono from
-#                    the app's skins/Streamline copy first;
-#                    see `variable version`)
+#  Version: 0.64.0  (generated custom-theme art in the app's data root,
+#                    history read through it; see `variable version`)
 #
 #
 #
 #  SAFETY STATUS: no database is opened. Nothing in history/ or history_v2/
 #  is written, renamed or deleted -- ever, in any version.
+#
+#  FILE WRITES (0.64.0): only the custom theme's generated backgrounds, their
+#  .sig stamp and the transient .baking marker, under
+#  [skin_settings_directory Lumen]/cache/<W>x<H>/ (= <data root>/skin_settings/
+#  Lumen/cache/..., see ::lumen::_skin_data_dir). Never inside the skin folder.
 #
 #  READ access is limited to history/*.shot files, read one at a time and
 #  only when a shot is being SELECTED for the home page (startup, a bag
@@ -109,7 +113,15 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.63.2"
+    variable version "0.64.0"
+
+    # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
+    # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
+    # (fonts/, sun_zones.txt) are read from here. Not [skin_directory]: that
+    # reads the live ::settings(skin), which the skin picker rewrites while
+    # the owner browses other skins.
+    variable skin_dir [file join [homedir] skins Lumen]
+    if { [info script] ne "" } { set skin_dir [file dirname [file normalize [info script]]] }
 
     variable C        ;# colour tokens
     array set C {}
@@ -487,6 +499,33 @@ proc ::lumen::app_screen {} {
         return {0 0}
     }
     return [list [expr {int($w)}] [expr {int($h)}]]
+}
+
+# 0.64.0 (de1app PR #369 review): user data goes through the app's data
+# root. de1app main (since e14b7d0, 2026-06-23) has data_directory; older
+# cores (stable v1.46.1, this tablet) have only homedir. Both name the same
+# folder on every platform today; packaged read-only builds will split
+# them. Code-root reads (standard_includes.tcl, skins/Streamline fonts)
+# stay on homedir. Never throws.
+proc ::lumen::data_root {} {
+    if {[llength [info commands ::data_directory]]} { return [::data_directory] }
+    return [homedir]
+}
+
+# Lumen's writable folder (optional sub-path), exactly what upstream
+# skin_settings_directory returns (utils.tcl:863-867): <data root>/
+# skin_settings/Lumen. Copied verbatim from the shared conventions
+# (passes/Lumen/john_review_2026-10-15.json, recommended_helper).
+proc ::lumen::_skin_data_dir {args} {
+    if {[llength [info commands ::skin_settings_directory]]} {
+        set d [file join [::skin_settings_directory Lumen] {*}$args]
+    } elseif {[llength [info commands ::data_directory]]} {
+        set d [file join [::data_directory] skin_settings Lumen {*}$args]
+    } else {
+        set d [file join [::homedir] skin_settings Lumen {*}$args]
+    }
+    if {![file isdirectory $d]} { file mkdir $d }
+    return $d
 }
 
 proc ::lumen::_init_layout {} {
@@ -1022,7 +1061,7 @@ proc ::lumen::_load_font_families {} {
     # the same family and only a fallback. A candidate is offered to dui
     # only when its file exists (no "can't find font file" WARN); one INFO
     # line names where each family came from.
-    set own [list [file join [homedir] skins Lumen fonts] "Lumen fonts/"]
+    set own [list [file join $::lumen::skin_dir fonts] "Lumen fonts/"]
     set app [list [file join [homedir] skins Streamline] "Streamline"]
     set where {}
     foreach {key file dirs} [list \
@@ -2791,7 +2830,7 @@ proc ::lumen::sun::iso6709 { s } {
 
 # {lat lon} of a zone (or of the zone its alias links to), or "".
 proc ::lumen::sun::zone_pos { zone } {
-    set f "[homedir]/skins/Lumen/sun_zones.txt"
+    set f [file join $::lumen::skin_dir sun_zones.txt]
     if { ![file isfile $f] } {
         msg -NOTICE "Lumen: sun times: $f is missing"
         return ""
@@ -3619,7 +3658,7 @@ proc ::lumen::last_shot_candidates { {bag ""} } {
     set out {}
     set cap 12
     if { $bag eq "" } { set bag [current_bag] }
-    set dir "[homedir]/history"
+    set dir [file join [::lumen::data_root] history]
     if { ![file isdirectory $dir] } { return {} }
 
     if { [info procs ::plugins::SDB::shots] ne "" \
@@ -3983,9 +4022,14 @@ proc ::lumen::refresh_after_history_change {} {
 #   * the current page is the home page ("off"): the material is baked from
 #     home art, and that is where the popup fires; on any other page a
 #     consumer keeps its opaque look.
-#   * both baked files exist in the folder matching this screen's exact
-#     physical WxH (consumers draw in physical pixels and cannot rescale;
-#     a 1280x800 tablet simply gets no material).
+#   * all three files exist at this screen's exact physical WxH (consumers
+#     draw in physical pixels and cannot rescale).
+#     0.64.0 (owner choice): dark / light come through dui's own resolver
+#     WITH rescale -- the screen's folder, else made from the 2560x1600 art
+#     and saved there -- so a skins/Lumen/<WxH>/ folder the core updater
+#     wiped heals on the first popup (a second or so, once), and a 1280x800
+#     tablet now gets dark / light glass too. Custom files come from the
+#     data-root cache by full path (custom::art_dir); they are never rescaled.
 # Dict: ok 1  page off  theme dark|light  radius 26  glass <path> dim <path>
 #
 # A consumer guards with [info procs ::lumen::glass_material] -- on any
@@ -4008,7 +4052,7 @@ proc ::lumen::glass_material {} {
     if { $sw <= 0 || $sh <= 0 } { return {} }
 
     # 0.49.0: the custom theme serves its own material, painted on the
-    # tablet by ensure_bake beside the page backgrounds (before this it
+    # tablet by ensure_bake with the page backgrounds (before this it
     # got the DARK files: the popup's ring and see-through card showed
     # the blue baked home art over a warm custom page -- owner report).
     # The consumer's `theme` is the text-colour set it should use, so a
@@ -4018,16 +4062,39 @@ proc ::lumen::glass_material {} {
         custom  { set theme [dict get [::lumen::custom::prefs] eff] ; set suffix [::lumen::custom::suffix $theme] }
         default { set suffix ""        ; set theme dark }
     }
-    set dir "[homedir]/skins/Lumen/${sw}x${sh}"
-    set glass "$dir/lumen_home_glass$suffix.png"
-    set dim   "$dir/lumen_home_dim$suffix.png"
-    # 0.39.1: the PLAIN page background joins the contract. The consumer
-    # rings its card with a crop of it so the overlay's boundary shows
-    # pixel-identical art to the page it covers -- no seam, no guessed
+    # 0.39.1: the PLAIN page background (lumen_home) joins the contract. The
+    # consumer rings its card with a crop of it so the overlay's boundary
+    # shows pixel-identical art to the page it covers -- no seam, no guessed
     # blend color (owner report on 3.14.3: every edge read as a hard
     # cliff). It is the same file the page itself is built on.
-    set bg "$dir/lumen_home$suffix.png"
-    if { ![file exists $glass] || ![file exists $dim] || ![file exists $bg] } { return {} }
+    if { $theme_mode eq "custom" } {
+        if { [catch { set cdir [::lumen::custom::art_dir $sw $sh] } err] } {
+            msg -ERROR "Lumen: custom glass material: $err"
+            return {}
+        }
+    }
+    set got {}
+    foreach {key name} [list glass lumen_home_glass dim lumen_home_dim bg lumen_home] {
+        if { $theme_mode eq "custom" } {
+            set p [file join $cdir "$name$suffix.png"]
+            if { ![file isfile $p] } { return {} }
+        } else {
+            if { ![llength [info commands ::dui::image::find]] } { return {} }
+            # dui's rescale runs outside any catch of its own; the contract
+            # here is "never throws", so a failed rescale is logged and the
+            # popup stays opaque.
+            if { [catch { set p [::dui::image::find "$name$suffix.png" 1] } err] } {
+                msg -ERROR "Lumen: glass material $name$suffix.png: $err"
+                return {}
+            }
+            if { $p eq "" || ![file isfile $p] } { return {} }
+            # dui's resolver searches every image dir; the material must be
+            # this screen's own size, never another folder's file.
+            if { [file tail [file dirname $p]] ne "${sw}x${sh}" } { return {} }
+        }
+        dict set got $key $p
+    }
+    set glass [dict get $got glass] ; set dim [dict get $got dim] ; set bg [dict get $got bg]
 
     return [dict create ok 1 page off theme $theme radius 26 \
         glass $glass dim $dim bg $bg]
@@ -5031,7 +5098,7 @@ proc ::lumen::act::_bag_source { bag } {
       || [info procs ::plugins::SDB::string2sql] eq "" } {
         error "the SDB plugin has no shot query"
     }
-    set dir "[homedir]/history"
+    set dir [file join [::lumen::data_root] history]
     set bagf "bean_desc=[::plugins::SDB::string2sql $bag]"
     set bev "COALESCE(beverage_type,'') NOT IN ('cleaning','calibrate')"
     set gone {}
@@ -5544,7 +5611,9 @@ proc ::lumen::step_tap { p sx sy sw sh side command label } {
 #  gradient as a one-column photo zoomed to the page width, every panel and
 #  pill as an RGBA PNG with a soft shadow (DrinkMenu v1.12.0's encoder
 #  pattern), composited over it and written to lumen_<page>_custom.png in
-#  the resolution folder dui already resolves. A signature file records the
+#  the data-root cache (0.64.0, custom::art_dir; the skin folder's
+#  resolution folder before), handed to dui by full path (::lumen::bg_ref).
+#  A signature file records the
 #  colours they were drawn from, so a launch with unchanged colours draws
 #  nothing. If drawing fails the pages fall back to -bg_color plus the
 #  vector glass primitive -- a generation behind, never blank.
@@ -6815,6 +6884,37 @@ proc ::lumen::custom::signature { pr } {
     return "4 $base [dict get $pr bh] [dict get $pr bs] [dict get $pr ah] [dict get $pr as]"
 }
 
+# 0.64.0 (de1app PR #369 review): where the custom theme's generated files
+# live -- <data root>/skin_settings/Lumen/cache/<W>x<H>/ (upstream:
+# [skin_settings_directory Lumen], whose own comment names caches as its
+# job). Until 0.63.2 they went into skins/Lumen/<W>x<H>/, the code folder:
+# read-only in packaged builds, and wiped by the core updater on screens
+# other than 2560x1600 / 1280x800. Files left there by older versions are
+# never read again (and never deleted by Lumen). Creates the folder; throws
+# only on a genuinely unwritable data root.
+proc ::lumen::custom::art_dir { W H } {
+    return [::lumen::_skin_data_dir cache ${W}x${H}]
+}
+
+# The one-line text of a stamp file (.sig / .baking), or "" when there is
+# none. Tests first and logs a real failure, so the expected "not there
+# yet" of a first bake never leaves an error behind in errorInfo; the
+# channel is closed even when the read fails.
+proc ::lumen::custom::_read_stamp { path } {
+    if { ![file isfile $path] } { return "" }
+    if { [catch { set fh [open $path r] } err] } {
+        msg -NOTICE "Lumen: could not open [file tail $path]: $err"
+        return ""
+    }
+    set rc [catch { read $fh } d]
+    close $fh
+    if { $rc } {
+        msg -NOTICE "Lumen: could not read [file tail $path]: $d"
+        return ""
+    }
+    return [string trim $d]
+}
+
 # Makes sure lumen_*_custom.png exist for the screen and match the saved
 # colours; draws them when they do not. Returns 1 when every file is in
 # place, 0 when drawing was impossible (no Tk, write failed) -- the caller
@@ -6827,7 +6927,10 @@ proc ::lumen::custom::ensure_bake { {base ""} } {
     if { [info commands image] eq "" } { return 0 }
     lassign [screen] W H
     if { $W <= 0 || $H <= 0 } { return 0 }
-    set dir "[homedir]/skins/Lumen/${W}x${H}"
+    if { [catch { set dir [art_dir $W $H] } err] } {
+        msg -ERROR "Lumen: no folder for the custom theme backgrounds: $err"
+        return 0
+    }
     set pr [prefs]
     if { $base eq "" } { set base [dict get $pr eff] }
     dict set pr eff $base
@@ -6838,8 +6941,7 @@ proc ::lumen::custom::ensure_bake { {base ""} } {
     dict for {name spec} $pages {
         if { ![file isfile "$dir/[dict get $spec out]$sfx.png"] } { set have 0 }
     }
-    set old ""
-    catch { set fh [open $sigfile r] ; set old [string trim [read $fh]] ; close $fh }
+    set old [_read_stamp $sigfile]
     if { $have && $old eq $sig } { return 1 }
 
     # 0.50.1 safety net: a bake that never returns (the Sea glass hang)
@@ -6850,8 +6952,7 @@ proc ::lumen::custom::ensure_bake { {base ""} } {
     # the colours change or the marker is cleared by hand.
     set marker "$dir/lumen$sfx.baking"
     if { [file exists $marker] } {
-        set was ""
-        catch { set fh [open $marker r] ; set was [string trim [read $fh]] ; close $fh }
+        set was [_read_stamp $marker]
         file delete -force $marker
         if { $was eq $sig } {
             msg -ERROR "Lumen: the last bake of this custom set ($sig) never finished; not trying it again at load"
@@ -6988,8 +7089,23 @@ proc ::lumen::apply_theme { mode } {
     return 1
 }
 
+# 0.64.0: what dui is handed for page background `img` in the current
+# theme. Shipped dark / light art by bare name, so dui's resolver finds it
+# (the screen's folder, else a rescale from 2560x1600). The custom theme's
+# generated art by FULL path in its data-root cache (custom::art_dir): a
+# bare custom name would let dui pick up stale pre-0.64.0 files still
+# sitting in skins/Lumen/<W>x<H>/, which is one of its image dirs.
+proc ::lumen::bg_ref { img } {
+    if { $::lumen::theme_mode eq "custom" } {
+        lassign [::lumen::custom::screen] W H
+        return [file join [::lumen::custom::art_dir $W $H] "$img$::lumen::_bg_suffix.png"]
+    }
+    return "$img$::lumen::_bg_suffix.png"
+}
+
 # The photo for one background file of the current theme, through dui's
-# own resolver (screen-size folder, 2560x1600 rescale fallback). Reuses
+# own resolver (screen-size folder, 2560x1600 rescale fallback; a full
+# path, as bg_ref gives for custom, is taken as it is). Reuses
 # the image dui loaded at page add when it has one; otherwise Lumen owns
 # it. A custom file is re-read from disk on every swap, because the same
 # filename holds different pixels after a re-bake.
@@ -7030,7 +7146,7 @@ proc ::lumen::_swap_backgrounds {} {
         foreach id [$can find withtag "pages&&$page"] {
             if { [$can type $id] eq "image" } {
                 if { $file eq "" } { continue }
-                set img [_bg_photo "$file$::lumen::_bg_suffix.png"]
+                set img [_bg_photo [bg_ref $file]]
                 $can itemconfigure $id -image $img
                 lappend in_use $img
             } else {
@@ -7214,7 +7330,7 @@ proc ::lumen::_page_bg_args { img } {
     if { $::lumen::theme_mode eq "custom" && !$::lumen::_custom_baked } {
         return [list -bg_color $::lumen::C(bg)]
     }
-    return [list -bg_img "$img$::lumen::_bg_suffix.png"]
+    return [list -bg_img [::lumen::bg_ref $img]]
 }
 
 dui page add off            {*}[::lumen::_page_bg_args lumen_home]

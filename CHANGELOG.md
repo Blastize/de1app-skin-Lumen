@@ -4,6 +4,43 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.0 - The custom theme's art lives in the data root; history is read through it (pass 19, 2026-10-21) - TABLET-VERIFIED 00:46 (verify.sh PASS run 1)
+
+Base: 0.63.2 (on the tablet). Minor, protocol lane, FLAGGED: the skin's only file-write location moves. From John Buckman's
+review of de1app PR #369, point 2 (generated art under [data_directory]) and the data-root rule.
+
+**Write path (full).** Only `::lumen::custom::ensure_bake` writes files, only for the custom theme, only when the saved colours'
+signature differs from the stamp beside them (or a file is missing):
+- Folder: `custom::art_dir W H` = `::lumen::_skin_data_dir cache <W>x<H>` (the shared conventions' helper, verbatim):
+  `[skin_settings_directory Lumen]/cache/<W>x<H>` on de1app main, `[data_directory]/skin_settings/Lumen/...` on a core with
+  data_directory only, `[homedir]/skin_settings/Lumen/...` on older cores (the tablet's 1.46.1: /sdcard/de1plus/skin_settings/
+  Lumen/cache/1340x800, the folder upstream resolves to on Android, so a core update moves nothing). Created on demand.
+- Files: `lumen_<page>{_custom,_customl}.png` x 7 (home, settings, flow_chart, flow, message, home_glass, home_dim),
+  `lumen{_custom,_customl}.sig`, and the transient `lumen{_custom,_customl}.baking` marker (written before painting, deleted
+  after; a marker left by a bake that died refuses that set once, logs, and is deleted). Nothing else is written or deleted.
+- Readers: `::lumen::bg_ref` hands dui the FULL cache path for custom (`_page_bg_args`, `_swap_backgrounds`) and the bare
+  shipped name for dark / light; `glass_material` reads custom from the cache. Pre-0.64.0 files in skins/Lumen/<WxH>/ are never
+  read, used or deleted (they stay on old tablets; a bare custom name would have let dui find them, so none reaches dui).
+- Migration: none. The first start on a custom theme re-paints once (7-18 s, earlier entries' timings); an Auto set's other half
+  at its first flip or the picker's Done. The two stamp reads lost their bare catches (`custom::_read_stamp`: tested first,
+  channel always closed). An unwritable data root -> ERROR, flat pages, never a throw.
+Also: history (`last_shot_candidates`, the bag arrows' `_bag_source`) is read from `[::lumen::data_root]/history`
+(data_directory when present, else homedir). fonts/ and sun_zones.txt come from the skin folder taken once at load
+(`::lumen::skin_dir`), not `[homedir]/skins/Lumen` or a live `[skin_directory]`. Dark / light glass now come through
+`dui::image::find <name> 1` (owner choice): a 1340x800 folder wiped by the core updater heals on the first popup (dui rescales
+from 2560x1600; a failure is logged, popup opaque, nothing thrown), and 1280x800 tablets get dark / light glass too.
+Tests: pass_19_offline 24/24 in three cores (OLD homedir only; UP data_directory + skin_settings_directory with a data root
+split from the code root; MID), every open / mkdir / delete / image write traced into the cache, decoy legacy files never read;
+the 0.63.2 copy fails 19. The tablet's core has no data_directory: it runs the homedir branch; the upstream branches are proven
+offline only. check_skin, pass_13/15/18 adapted (homedir scratch, dui find stub, data_root, skin_dir).
+Tablet: the first boot painted the dark half once (11.6 s) into /sdcard/de1plus/skin_settings/Lumen/cache/1340x800 (7 PNG +
+sig, no marker left); the next restart painted nothing; skins/Lumen/1340x800 was untouched (listing identical). Pages are
+pixel-identical to 0.63.2 except the version caption and the clock.
+
+**Safety status:** one write capability, MOVED (not added): the custom theme's PNG / sig / marker, now under the data root's
+skin_settings/Lumen/cache/<WxH>/ and never in the skin folder. No delete beyond its own marker; legacy files untouched.
+history/ and history_v2/ are still only read; no database is opened.
+
 ## 0.63.2 - filelist.txt for the de1app build; Noto Sans Mono from Streamline (pass 18, 2026-10-21) - TABLET-VERIFIED 00:16 (verify.sh PASS run 1)
 
 Base: 0.63.1 (on the tablet; 0.63.0 and 0.63.1 now committed). Patch, protocol lane (packaging + startup font source), from John

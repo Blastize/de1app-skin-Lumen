@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.63.2 · a skin for the Decent DE1app · by Blastize
+Version 0.64.0 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -41,7 +41,7 @@ Copy the folder to `de1plus/skins/Lumen/`, restart the app, pick **Lumen** under
 
 ## Safety
 
-Lumen writes only the app's own settings through the app's own calls (temperatures, volumes, its theme and favorite slots), plus, on a custom theme, the backgrounds it paints into its own folder. It never touches shot files or the shot database and never starts a flow on its own.
+Lumen writes only the app's own settings through the app's own calls (temperatures, volumes, its theme and favorite slots), plus, on a custom theme, the backgrounds it paints, kept in its own cache in the app's data folder (`skin_settings/Lumen/cache/`). It never touches shot files or the shot database and never starts a flow on its own.
 
 <details>
 <summary><b>Full reference and version notes</b></summary>
@@ -56,9 +56,22 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.63.2 — every page built, baked and running on the tablet.**
+**Version 0.64.0 — every page built, baked and running on the tablet.**
 
-New in 0.63.2: **ready to ship with the app.** Lumen now has a
+New in 0.64.0: **your custom theme's backgrounds live in the app's data
+folder.** The backgrounds Lumen paints for a custom theme, and their
+stamp, now go to `skin_settings/Lumen/cache/<width>x<height>/` in the
+app's data folder instead of the skin's own folder, which newer app
+builds keep read-only. After updating, a custom theme is painted once
+more at the first start (7 to 18 seconds; the other half of an Auto set
+at its first switch), then never again until you change its colours.
+The copies older versions left in the skin folder are simply not used
+any more. Shot history is read through the app's data folder too. And if
+an app update clears the skin's screen-size folder, Grind Advisor's glass
+popup now rebuilds its glass on the first open instead of turning opaque;
+on a 1280x800 tablet the popup now gets glass on Dark and Light as well.
+
+Earlier, 0.63.2: **ready to ship with the app.** Lumen now has a
 `filelist.txt`, the list the de1app build uses to pick which skin files go
 into the app: the skin code, the sunrise table, the pre-drawn backgrounds
 for 1340x800 and 2560x1600, the skin-picker icons, and the Inter fonts
@@ -508,8 +521,10 @@ lightness, and only as far as the surface it sits on needs for 4.5:1
 pre-rendered for arbitrary colours, so at the first launch after a change
 the skin paints them in
 pure Tcl — the gradient, every panel and pill with a soft shadow, the
-bloom — and writes `lumen_<page>_custom.png` next to the baked images,
-with a `lumen_custom.sig` stamp so unchanged colours draw nothing. If
+bloom — and writes `lumen_<page>_custom.png` into
+`skin_settings/Lumen/cache/<width>x<height>/` in the app's data folder
+(since 0.64.0; next to the baked images before), with a `lumen_custom.sig`
+stamp so unchanged colours draw nothing. If
 painting fails, the pages fall back to flat colour with vector panels.
 Since 0.49.0 it also paints the frosted glass Grind Advisor's popups float
 on, so they keep the glass look under Custom too.
@@ -623,7 +638,8 @@ it hardcodes a coordinate.
 ## Safety
 
 No database is opened, and no file in `history/` or `history_v2/` is
-written, renamed or deleted. Shot files in `history/` are **read**, one at
+written, renamed or deleted. Shot files in `history/` (in the app's data
+folder since 0.64.0) are **read**, one at
 a time and only when the home page selects a shot to show (startup, a bag
 cycle, a Shot History Editor change, the end of a cleaning run) — never on
 the refresh tick. Which files to try comes from SDB's public read API when
@@ -649,9 +665,13 @@ clamps its value. Three groups:
   DrinkMenu and DYE make), then `save_settings` + `save_settings_to_de1`
   a second later. Refused while the machine is running. It never starts
   a flow: the GHC does.
-* **Files:** the custom theme writes `lumen_<page>_custom.png` and
-  `lumen_custom.sig` into `skins/Lumen/<width>x<height>/` — its own
-  folder, nothing else.
+* **Files:** the custom theme writes `lumen_<page>_custom.png`,
+  `lumen_custom.sig` and, while painting, a `lumen_custom.baking` marker
+  (`_customl` for an Auto set's light half) into
+  `skin_settings/Lumen/cache/<width>x<height>/` under the app's data
+  folder (`[data_directory]`; `[homedir]` on apps that predate it, the
+  same folder on Android) — nothing else, never inside the skin folder
+  (0.64.0). Deleting that cache only makes Lumen paint it again.
   Since 0.36.0 the chart is always smooth with stage lines shown —
   `live_graph_smoothing_technique` and `lumen_chart_stages` are no
   longer read or written.
