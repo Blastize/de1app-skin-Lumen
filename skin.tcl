@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.0  (generated custom-theme art in the app's data root,
-#                    history read through it; see `variable version`)
+#  Version: 0.64.1  (the cleaning banner reads Maintenance Tracker's
+#                    run_status; see `variable version`)
 #
 #
 #
@@ -113,7 +113,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.0"
+    variable version "0.64.1"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -3272,9 +3272,19 @@ proc ::lumen::data::maint_state {} {
 # MT's pending run is read from its settings(run_restore) dict (keys
 # prev_title clean_fn ts, MT CHANGELOG 0.27.0) behind info-exists gates,
 # and the only call is MT's public cancel_profile_run.
+# 0.64.1: with MT 0.33.0+ the run comes from MT's public run_status
+# instead (state armed / running / stale, judged by MT from the live
+# loaded profile). Since MT 0.32.0 a run left by an app restart, or one
+# whose automatic switch-back was skipped, never switches back by itself,
+# so the ts + timeout read above named a time already gone ("comes back
+# at 12:29 AM", seen on the tablet 2026-10-21); a stale run now says it
+# did not come back. MT < 0.33.0 keeps the settings(run_restore) path.
 namespace eval ::lumen {
     variable cbanner_on 0
     variable cbanner_fill ""
+    # run_status's last error, logged once (the banner reads it on the
+    # 200 ms tick).
+    variable mt_status_err ""
 }
 proc ::lumen::data::_sep {} { return "  [::lumen::glyph dot]  " }
 
@@ -3285,8 +3295,12 @@ proc ::lumen::data::clean_loaded {} {
 }
 
 # MT's pending switch-back for the LOADED profile as a dict
-# {prev_title back_at started}, or "" (none, MT absent, or malformed).
+# {state prev_title back_at}, or "" (none, MT absent, or malformed).
+# state: armed (back_at = when MT's timeout switches back, in the CLOCK
+# row's format; "" when MT gives none), running (comes back when the run
+# ends) or stale (MT 0.33.0+ only: it will not come back by itself).
 proc ::lumen::data::mt_run {} {
+    if { [info procs ::plugins::MaintenanceTracker::run_status] ne "" } { return [_mt_run_status] }
     if { ![info exists ::plugins::MaintenanceTracker::settings(run_restore)] } { return "" }
     set rr $::plugins::MaintenanceTracker::settings(run_restore)
     if { ![string is list $rr] || [llength $rr] % 2 != 0 } { return "" }
@@ -3301,12 +3315,41 @@ proc ::lumen::data::mt_run {} {
         set t $::plugins::MaintenanceTracker::run_timeout_s
         if { [string is wide -strict $t] && $t > 0 } { set tmo $t }
     }
-    set started 0
-    catch { if { $::plugins::MaintenanceTracker::run_started } { set started 1 } }
+    set state armed
+    catch { if { $::plugins::MaintenanceTracker::run_started } { set state running } }
     # 0.62.0 (F21): in the CLOCK row's 12/24 h ("08:17 PM"); it was always
     # 24 h, whatever the taskbar showed.
-    return [dict create prev_title [dict get $rr prev_title] \
-        back_at [::lumen::_fmt_time [expr {$ts + $tmo}]] started $started]
+    return [dict create state $state prev_title [dict get $rr prev_title] \
+        back_at [::lumen::_fmt_time [expr {$ts + $tmo}]]]
+}
+
+# 0.64.1: mt_run from MT 0.33.0's public run_status (read-only). MT gives
+# state none | armed | running | stale, prev_title (prev_fn when it had
+# none) and back_at (epoch seconds, armed only). A throw is logged once
+# and reads as no run; anything malformed reads as no run.
+proc ::lumen::data::_mt_run_status {} {
+    variable ::lumen::mt_status_err
+    if { [catch { set d [::plugins::MaintenanceTracker::run_status] } err] } {
+        if { $err ne $mt_status_err } {
+            set mt_status_err $err
+            msg -ERROR "Lumen: could not read Maintenance Tracker's run status: $err"
+        }
+        return ""
+    }
+    set mt_status_err ""
+    if { ![string is list $d] || [llength $d] % 2 != 0 || ![dict exists $d state] } { return "" }
+    set state [dict get $d state]
+    if { $state ni {armed running stale} } { return "" }
+    set prev ""
+    foreach k {prev_title prev_fn} {
+        if { $prev eq "" && [dict exists $d $k] } { set prev [string trim [dict get $d $k]] }
+    }
+    if { $prev eq "" } { return "" }
+    set back ""
+    if { $state eq "armed" && [dict exists $d back_at] } {
+        set back [::lumen::_fmt_time [dict get $d back_at]]
+    }
+    return [dict create state $state prev_title $prev back_at $back]
 }
 
 # The banner's two lines of text; the left one also paints / blanks the
@@ -3336,6 +3379,10 @@ proc ::lumen::data::clean_banner_right {} {
 # Measured in the banner's own fonts (_text_w / _fit_text); off-tablet the
 # old 40 / 28 character caps stand in. Normal case now: ~60 px apart (the
 # pass 13 test, 3% wide glyphs); a long title is cut, never overlapped.
+# 0.64.1: the right line by mt_run's state -- armed "comes back at <time>"
+# (or "after the run" when MT gives no time), running "comes back after
+# the run", stale "did not come back"; armed and stale end in the tap
+# hint. None is wider than the armed line without a time.
 proc ::lumen::data::_cbanner_texts {} {
     variable ::lumen::L
     set t [_s ::settings(profile_title)]
@@ -3345,10 +3392,16 @@ proc ::lumen::data::_cbanner_texts {} {
         set right [translate "Pick your espresso profile before brewing"]
     } else {
         set prev [::lumen::_fit_text [dict get $run prev_title] $L(font_caption) 240 28]
-        if { [dict get $run started] } {
+        set state [dict get $run state]
+        set back [dict get $run back_at]
+        if { $state eq "running" } {
             set right "$prev [translate {comes back after the run}]"
+        } elseif { $state eq "stale" } {
+            set right "$prev [translate {did not come back}][_sep][translate {Tap to switch back now}]"
+        } elseif { $back eq "" } {
+            set right "$prev [translate {comes back after the run}][_sep][translate {Tap to switch back now}]"
         } else {
-            set right "$prev [translate {comes back at}] [dict get $run back_at][_sep][translate {Tap to switch back now}]"
+            set right "$prev [translate {comes back at}] $back[_sep][translate {Tap to switch back now}]"
         }
     }
     set lead "[translate {CLEANING PROFILE LOADED}][_sep]"
@@ -4467,6 +4520,7 @@ namespace eval ::lumen::act {
 # 0.58.0: the cleaning banner's tap. Only while the banner shows AND MT
 # holds a switch-back for the loaded profile; otherwise the band is inert
 # (no flash -- nothing on the chart legend was ever tappable).
+# 0.64.1: a stale run counts (MT's cancel_profile_run switches it back too).
 proc ::lumen::act::clean_banner_tap {} {
     if { ![::lumen::data::clean_loaded] || [::lumen::data::mt_run] eq "" } { return }
     if { [info procs ::plugins::MaintenanceTracker::cancel_profile_run] eq "" } { return }

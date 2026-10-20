@@ -4,6 +4,25 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.1 - The cleaning banner reads Maintenance Tracker's run_status (pass 20, 2026-10-21) - TABLET-VERIFIED 01:00 (verify.sh PASS run 1); stale banner seen live 01:03
+
+Base: 0.64.0 (on the tablet). Patch, protocol lane (reads another plugin's API). Since MT 0.32.0 a run left by an app
+restart, or one whose automatic switch-back was skipped, never switches back by itself, yet the banner still computed
+`ts + run_timeout_s` and said "<profile> comes back at 12:29 AM" after that time had gone (tablet, 2026-10-21).
+- With MT 0.33.0+ (`info procs ::plugins::MaintenanceTracker::run_status`), `mt_run` reads MT's public `run_status`:
+  armed "<profile> comes back at <back_at, CLOCK row format> . Tap to switch back now" (no usable back_at: "comes back
+  after the run . Tap ..."), running "comes back after the run", stale "<profile> did not come back . Tap to switch back
+  now", none "Pick your espresso profile before brewing". MT < 0.33.0 keeps the settings(run_restore) path unchanged.
+- The tap is unchanged: MT's public `cancel_profile_run` whenever a run is named (it switches a stale run back too).
+- A `run_status` throw reads as no run and is logged once per distinct error (the banner reads it on the 200 ms tick).
+Tests: pass_20_offline 14/14 with MT's REAL run_status procs (armed / running / stale / none / throw / malformed / old
+MT / measured widths); the 0.64.0 copy fails P20-STALE. check_skin both modes, pass_13-19, check_last_shot, filelist ok.
+Tablet (MT 0.33.1, owner-approved): Start on Backflush - Water -> "comes back at 01:11 AM"; force-stop + relaunch -> "did not
+come back . Tap to switch back now"; the tap -> MT "switched back to 'Gentle and sweet' (cancel)", run_restore {}, banner gone.
+
+**Safety status:** no write behaviour added or changed. MT is only read (`run_status`) and called through its public
+`cancel_profile_run` on a tap, as before; nothing of MT's is set. The only file writes remain 0.64.0's custom-theme cache.
+
 ## 0.64.0 - The custom theme's art lives in the data root; history is read through it (pass 19, 2026-10-21) - TABLET-VERIFIED 00:46 (verify.sh PASS run 1)
 
 Base: 0.63.2 (on the tablet). Minor, protocol lane, FLAGGED: the skin's only file-write location moves. From John Buckman's

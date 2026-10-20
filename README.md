@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.0 · a skin for the Decent DE1app · by Blastize
+Version 0.64.1 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -13,7 +13,7 @@ Version 0.64.0 · a skin for the Decent DE1app · by Blastize
 
 ![A red banner over the graph card: CLEANING PROFILE LOADED, Cleaning/Forward Flush x5; Gentle and sweet comes back at 18:31, tap to switch back now](docs/cleaning_banner.png)
 
-**Never brew on the cleaning profile.** While a cleaning profile is loaded, a red banner says so. After Maintenance Tracker's Start it also says when your espresso profile comes back, and one tap brings it back now.
+**Never brew on the cleaning profile.** While a cleaning profile is loaded, a red banner says so. After Maintenance Tracker's Start it also says when your espresso profile comes back, and one tap brings it back now. If it did not come back on its own (the app restarted mid-clean, say), the banner says so, and the same tap brings it back.
 
 ![Grind Advisor's after-shot popup on Lumen's glass, in the theme's colours](docs/glass_popup.png)
 
@@ -56,9 +56,21 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.0 — every page built, baked and running on the tablet.**
+**Version 0.64.1 — every page built, baked and running on the tablet.**
 
-New in 0.64.0: **your custom theme's backgrounds live in the app's data
+New in 0.64.1: **the cleaning banner never names a time that has gone.**
+Since Maintenance Tracker 0.32.0, a cleaning run left loaded by an app
+restart (or one Maintenance Tracker could not safely switch back from)
+stays loaded until you switch back yourself, but the banner still said
+"Gentle and sweet comes back at 12:29 AM" long after 12:29. With
+Maintenance Tracker 0.33.0 or newer the banner now asks Maintenance
+Tracker where the run stands: before the run it says when your profile
+comes back, during the run "comes back after the run", and once it will
+not come back by itself, "Gentle and sweet did not come back · Tap to
+switch back now". The tap works as before. With an older Maintenance
+Tracker nothing changes.
+
+Earlier, 0.64.0: **your custom theme's backgrounds live in the app's data
 folder.** The backgrounds Lumen paints for a custom theme, and their
 stamp, now go to `skin_settings/Lumen/cache/<width>x<height>/` in the
 app's data folder instead of the skin's own folder, which newer app
@@ -347,7 +359,7 @@ backdrop and let the shadow do the separating.
 | Taskbar (top) | Live clock over the date, and the water left in the tank in mL — amber under 300 ml, blank when no machine is connected | The five icons: power symbol (far left, alone) = sleep; at the right, mug = Drink Menu, wrench = MaintenanceTracker's card list, gear = Lumen settings, DE1 side view = the stock app settings |
 | Favorite profiles (taskbar, three slots across the middle) | Each slot shows its profile's name, centred and cut with an ellipsis when long: a dim `+` is an empty slot, grey is a set one, and the loaded profile's slot reads in crema over a soft crema halo | Tap an empty slot to store the profile loaded now; tap a set slot to load its profile (refused while the machine is running). Put your backflush profile in one and a cleaning run is one tap plus the GHC button. "Clear favorite profiles" on the Lumen settings page empties all three, with six seconds to undo |
 | Maintenance dot (at the wrench) | Amber when a maintenance item is due soon, red when one is overdue — driven by the MaintenanceTracker plugin's status; blank when all is well or the plugin is absent | — |
-| Cleaning banner (top of the graph card, 0.58.0) | A red strip while a cleaning profile is loaded: "CLEANING PROFILE LOADED" and its name, plus which espresso profile comes back and when (after Maintenance Tracker's Start), or "Pick your espresso profile before brewing" | While Maintenance Tracker holds a switch-back: switch back to the espresso profile now |
+| Cleaning banner (top of the graph card, 0.58.0) | A red strip while a cleaning profile is loaded: "CLEANING PROFILE LOADED" and its name, plus which espresso profile comes back and when (after Maintenance Tracker's Start), that it "did not come back" when Maintenance Tracker 0.33.0+ says it will not switch back by itself (0.64.1), or "Pick your espresso profile before brewing" | While Maintenance Tracker holds a switch-back: switch back to the espresso profile now |
 | Grind | NEXT GRIND: GrindAdvisor's next setting for the loaded bag, the move in words ("finer by 0.5"), one plain line on why ("15.5 s, target 28 s: go finer"), how sure it is in the chip (Low / Medium / High / Very high), and the shots it stands on ("4 of 5 shots on this bag", with a green or amber dot for high or low confidence). A bag with no shots yet shows the **starting estimate** instead (GrindAdvisor 3.13.0): STARTING ESTIMATE header, `~` before the number, and which bags it was borrowed from | Opens GrindAdvisor's settings (target time, rounding, history) |
 | Shot analysis (on the grind tile) | — | Opens GrindAdvisor's result popup |
 | Curve (on the grind tile) | — | Opens GrindAdvisor's Calibration Curve directly |
