@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.3  (the safety notes say who writes what: Lumen's cache vs
-#                    dui's own rescale; see `variable version`)
+#  Version: 0.64.4  (every call into another plugin waits for `plugins
+#                    loaded`; cleaning-banner guards; see `variable version`)
 #
 #
 #
@@ -120,7 +120,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.3"
+    variable version "0.64.4"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -1464,6 +1464,8 @@ proc ::lumen::data::grind_rec {} {
     # recommendation was about a different bag and cleared the tile -- but a
     # bag you cycle back to has its own history and its own regression, and
     # throwing that away was the wrong call.
+    # 0.64.4: a peeked-but-disabled Grind Advisor has these procs too.
+    if { ![::lumen::plugin_on GrindAdvisor] } { return {} }
     if { [info procs ::plugins::GrindAdvisor::recommendation_for_current_bag] ne "" } {
         if { ![catch { set rec [::plugins::GrindAdvisor::recommendation_for_current_bag] } err] } {
             if { $rec eq "" } { return {} }
@@ -1570,6 +1572,7 @@ proc ::lumen::data::_est {} {
     variable est_sig
     variable est_val
     variable est_note
+    if { ![::lumen::plugin_on GrindAdvisor] } { return {{} {}} }
     if { [info procs ::plugins::GrindAdvisor::starting_estimate] eq "" } { return {{} {}} }
     if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {{} {}} }
     if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {{} {}} }
@@ -1912,9 +1915,11 @@ proc ::lumen::data::last_ratio_note {} {
 #
 # DYE stages next-shot values in ::plugins::DYE::settings(next_*) and falls
 # back to the core ::settings. We do the same, so the strip still works with
-# DYE disabled.
+# DYE disabled. 0.64.4: "disabled" includes installed-but-off -- the core
+# peeks DYE and loads its saved settings, so stale next_* values exist then.
 
 proc ::lumen::data::_dye { field } {
+    if { ![::lumen::plugin_on DYE] } { return "" }
     if { ![info exists ::plugins::DYE::settings(next_$field)] } { return "" }
     return [string trim [set ::plugins::DYE::settings(next_$field)]]
 }
@@ -2940,9 +2945,10 @@ proc ::lumen::sun::resolve {} {
 
 # 0.64.2 (de1app PR #369 review, point 4): the position is only looked up
 # for the Auto theme -- once per session, the first time its schedule is
-# needed (auto_bounds: an Auto boot, a switch to Auto, the picker's Auto
-# preview, an Auto set's flip). A Dark / Light / fixed custom user never
-# runs getprop or touches the location service.
+# needed (0.64.4: from auto_wanted, whose callers all have an Auto base: an
+# Auto boot, the Auto pill, an Auto set's flip). A Dark / Light / fixed
+# custom user never runs getprop or touches the location service, picker
+# visits included (its schedule line then shows the fixed times).
 proc ::lumen::sun::ensure {} {
     variable asked
     if { $asked } { return }
@@ -3044,7 +3050,6 @@ proc ::lumen::sun::describe {} {
 # {light_from dark_from} in force today: sunrise / sunset, else the saved
 # fixed times. Polar days come back as day / night.
 proc ::lumen::auto_bounds {} {
-    ::lumen::sun::ensure
     set s [::lumen::sun::today]
     if { $s eq "" } { return [list [auto_minutes light] [auto_minutes dark]] }
     return $s
@@ -3056,6 +3061,11 @@ proc ::lumen::auto_bounds {} {
 # all day. scan, not expr, on the clock fields: "08" is not octal.
 # 0.59.0: the two times come from auto_bounds (sunrise / sunset).
 proc ::lumen::auto_wanted { {now ""} } {
+    # 0.64.4: the one place the sunrise / sunset lookup is asked for --
+    # every caller has an Auto base (prefs, signature, auto_check). The
+    # picker's schedule line reads auto_bounds without it, so a non-Auto
+    # visit shows the fixed times and looks nothing up.
+    ::lumen::sun::ensure
     if { $now eq "" } {
         set s [clock seconds]
         set now [expr {[scan [clock format $s -format %H] %d] * 60 + [scan [clock format $s -format %M] %d]}]
@@ -3304,6 +3314,7 @@ proc ::lumen::data::clock_date_label {} {
 # anything malformed): the dot only exists to say "attention", so every
 # failure mode maps to no dot.
 proc ::lumen::data::maint_state {} {
+    if { ![::lumen::plugin_on MaintenanceTracker] } { return "" }
     if { [info procs ::plugins::MaintenanceTracker::status_summary] eq "" } { return "" }
     if { [catch { set s [::plugins::MaintenanceTracker::status_summary] } err] } {
         msg -ERROR "Lumen: could not read the maintenance status: $err"
@@ -3354,13 +3365,18 @@ proc ::lumen::data::clean_loaded {} {
 # row's format; "" when MT gives none), running (comes back when the run
 # ends) or stale (MT 0.33.0+ only: it will not come back by itself).
 proc ::lumen::data::mt_run {} {
+    # 0.64.4: MT installed but not enabled is peeked -- run_status exists
+    # and fails on settings it never set up (a bare catch inside MT, 2x per
+    # 200 ms tick, leaving errorInfo dirty) -- and a leftover run_restore
+    # would make the banner's tap load a profile. Not enabled = no run.
+    if { ![::lumen::plugin_on MaintenanceTracker] } { return "" }
     if { [info procs ::plugins::MaintenanceTracker::run_status] ne "" } { return [_mt_run_status] }
     if { ![info exists ::plugins::MaintenanceTracker::settings(run_restore)] } { return "" }
     set rr $::plugins::MaintenanceTracker::settings(run_restore)
     if { ![string is list $rr] || [llength $rr] % 2 != 0 } { return "" }
     foreach k {prev_title clean_fn ts} { if { ![dict exists $rr $k] } { return "" } }
     set cur ""
-    catch { set cur [string trim $::settings(profile_filename)] }
+    if { [info exists ::settings(profile_filename)] } { set cur [string trim $::settings(profile_filename)] }
     if { ![string equal -nocase $cur [dict get $rr clean_fn]] } { return "" }
     set ts [dict get $rr ts]
     if { ![string is wide -strict $ts] } { return "" }
@@ -3375,9 +3391,19 @@ proc ::lumen::data::mt_run {} {
     if { [info exists ::plugins::MaintenanceTracker::run_started] \
       && [string is true -strict $::plugins::MaintenanceTracker::run_started] } { set state running }
     # 0.62.0 (F21): in the CLOCK row's 12/24 h ("08:17 PM"); it was always
-    # 24 h, whatever the taskbar showed.
+    # 24 h, whatever the taskbar showed. 0.64.4: a time already gone is
+    # never shown (the banner's no-time line instead).
     return [dict create state $state prev_title [dict get $rr prev_title] \
-        back_at [::lumen::_fmt_time [expr {$ts + $tmo}]]]
+        back_at [_future_time [expr {$ts + $tmo}]]]
+}
+
+# 0.64.4: an epoch time still ahead, in the CLOCK row's format; "" when it
+# has passed or is not a time. MT 0.33.0 / 0.33.1 can report an armed run's
+# back_at in the past (its switch-back was missed); the banner then says
+# "comes back after the run" rather than naming a time that has gone.
+proc ::lumen::data::_future_time { t } {
+    if { ![string is wide -strict $t] || $t <= [clock seconds] } { return "" }
+    return [::lumen::_fmt_time $t]
 }
 
 # 0.64.1: mt_run from MT 0.33.0's public run_status (read-only). MT gives
@@ -3404,7 +3430,7 @@ proc ::lumen::data::_mt_run_status {} {
     if { $prev eq "" } { return "" }
     set back ""
     if { $state eq "armed" && [dict exists $d back_at] } {
-        set back [::lumen::_fmt_time [dict get $d back_at]]
+        set back [_future_time [dict get $d back_at]]
     }
     return [dict create state $state prev_title $prev back_at $back]
 }
@@ -3633,6 +3659,11 @@ proc ::lumen::refresh_bag_list { args } {
     if { ![::lumen::plugin_on SDB] || [info procs ::plugins::SDB::available_categories] eq "" } {
         set bag_list {}
         return
+    }
+    # 0.64.4: SDB enabled after startup (Extensions) -- follow its shot save
+    # from now on too, not only from the next restart. Once per session.
+    if { !([info exists ::lumen::sdb_hooked] && $::lumen::sdb_hooked) && [catch { ::lumen::hook_sdb_save } err] } {
+        msg -ERROR "Lumen: could not follow SDB's shot save: $err"
     }
     if { [catch {
         set bags [::plugins::SDB::available_categories bean_desc 1 {} 0]
@@ -4441,7 +4472,12 @@ proc ::lumen::act::_accel_step { key dir } {
 }
 
 proc ::lumen::act::grind_popup {} {
-    if { [catch { ::plugins::GrindAdvisor::show_last_recommendation } err] } {
+    if { [catch {
+        if { ![::lumen::plugin_on GrindAdvisor] || [info procs ::plugins::GrindAdvisor::show_last_recommendation] eq "" } {
+            error "the Grind Advisor plugin is not loaded"
+        }
+        ::plugins::GrindAdvisor::show_last_recommendation
+    } err] } {
         msg -ERROR "Lumen: could not open the Grind Advisor result: $err"
     }
 }
@@ -4452,6 +4488,7 @@ proc ::lumen::act::grind_popup {} {
 # popup. On an older GrindAdvisor the proc is absent, so fall back to the
 # result popup rather than leaving a dead button.
 proc ::lumen::act::grind_curve {} {
+    if { ![::lumen::plugin_on GrindAdvisor] } { grind_popup ; return }
     if { [info procs ::plugins::GrindAdvisor::show_calibration_curve] eq "" } {
         msg -NOTICE "Lumen: GrindAdvisor has no calibration curve, opening the result popup instead"
         grind_popup
@@ -4463,7 +4500,12 @@ proc ::lumen::act::grind_curve {} {
 }
 
 proc ::lumen::act::dye_next {} {
-    if { [catch { ::plugins::DYE::open -which_shot next } err] } {
+    if { [catch {
+        if { ![::lumen::plugin_on DYE] || [info procs ::plugins::DYE::open] eq "" } {
+            error "the DYE plugin is not loaded"
+        }
+        ::plugins::DYE::open -which_shot next
+    } err] } {
         msg -ERROR "Lumen: could not open DYE next shot: $err"
     }
 }
@@ -4589,6 +4631,9 @@ namespace eval ::lumen::act {
 # (no flash -- nothing on the chart legend was ever tappable).
 # 0.64.1: a stale run counts (MT's cancel_profile_run switches it back too).
 proc ::lumen::act::clean_banner_tap {} {
+    # 0.64.4: never with MT installed but not enabled (mt_run says no run
+    # then too; the check is repeated here because this tap loads a profile).
+    if { ![::lumen::plugin_on MaintenanceTracker] } { return }
     if { ![::lumen::data::clean_loaded] || [::lumen::data::mt_run] eq "" } { return }
     if { [info procs ::plugins::MaintenanceTracker::cancel_profile_run] eq "" } { return }
     if { [catch { ::plugins::MaintenanceTracker::cancel_profile_run } err] } {
@@ -4830,7 +4875,7 @@ proc ::lumen::act::adjust_grind { delta } {
     if { $new < 0 } { set new 0 } elseif { $new > 100 } { set new 100 }
     set new [format %.1f $new]
     if { [catch {
-        if { [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
+        if { [::lumen::plugin_on DYE] && [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
             set ::plugins::DYE::settings(next_grinder_setting) $new
             plugins save_settings DYE
         }
@@ -5044,7 +5089,7 @@ proc ::lumen::act::adjust_dose { delta } {
     if { $new < 2 } { set new 2 } elseif { $new > 40 } { set new 40 }
     set new [format %.1f $new]
     if { [catch {
-        if { [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
+        if { [::lumen::plugin_on DYE] && [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
             set ::plugins::DYE::settings(next_grinder_dose_weight) $new
             plugins save_settings DYE
         }
@@ -5118,7 +5163,7 @@ proc ::lumen::act::reconnect_scale {} {
 # returns straight back here with no bookkeeping on our side.
 proc ::lumen::act::shot_history {} {
     if { [catch {
-        if { [info procs ::plugins::ShotHistoryEditor::open_page] eq "" } {
+        if { ![::lumen::plugin_on ShotHistoryEditor] || [info procs ::plugins::ShotHistoryEditor::open_page] eq "" } {
             error "the Shot History Editor plugin is not loaded"
         }
         ::plugins::ShotHistoryEditor::open_page ShotHistoryEditor_settings
@@ -5134,7 +5179,7 @@ proc ::lumen::act::shot_history {} {
 # contract as the Shot History shortcut above -- no bookkeeping on our side.
 proc ::lumen::act::open_grind_advisor {} {
     if { [catch {
-        if { [info procs ::plugins::GrindAdvisor::open_settings_dialog] eq "" } {
+        if { ![::lumen::plugin_on GrindAdvisor] || [info procs ::plugins::GrindAdvisor::open_settings_dialog] eq "" } {
             error "the Grind Advisor plugin is not loaded"
         }
         ::plugins::GrindAdvisor::open_settings_dialog GrindAdvisor_settings
@@ -5150,7 +5195,7 @@ proc ::lumen::act::open_grind_advisor {} {
 # accepts), so Done returns straight here with no bookkeeping on our side.
 proc ::lumen::act::open_maintenance {} {
     if { [catch {
-        if { [info procs ::plugins::MaintenanceTracker::open_page] eq "" } {
+        if { ![::lumen::plugin_on MaintenanceTracker] || [info procs ::plugins::MaintenanceTracker::open_page] eq "" } {
             error "the Maintenance Tracker plugin is not loaded"
         }
         ::plugins::MaintenanceTracker::open_page MaintenanceTracker_settings
@@ -5168,7 +5213,7 @@ proc ::lumen::act::open_maintenance {} {
 # plugin: the tap logs the error and does nothing else.
 proc ::lumen::act::open_drinkmenu {} {
     if { [catch {
-        if { [info procs ::plugins::DrinkMenu::open_page] eq "" } {
+        if { ![::lumen::plugin_on DrinkMenu] || [info procs ::plugins::DrinkMenu::open_page] eq "" } {
             error "the Drink Menu plugin is not loaded"
         }
         ::plugins::DrinkMenu::open_page DrinkMenu_main
@@ -5350,6 +5395,9 @@ proc ::lumen::act::cycle_bag { dir } {
 
 proc ::lumen::act::scan_bag {} {
     if { [catch {
+        if { ![::lumen::plugin_on BeanScanner] || [info procs ::plugins::BeanScanner::open_page] eq "" } {
+            error "the Bean Scanner plugin is not loaded"
+        }
         # BeanScanner >= 0.3.0 exposes set_return_page for exactly this: it
         # records where we came from AND marks that we entered at a sub-page,
         # so Cancel comes straight back here instead of via its settings
@@ -9205,12 +9253,14 @@ after 5000 ::lumen::_deferred_start
 # the cached list without that bag: every dot hollow until an arrow tap
 # re-read SDB (owner report 2026-09-24). A leave trace on the hook SDB runs
 # on both paths re-reads once the row exists; one query per saved shot.
+namespace eval ::lumen { variable sdb_hooked 0 }   ;# 0.64.4: the trace is on (once per session)
 proc ::lumen::hook_sdb_save {} {
     set p ::plugins::SDB::save_espresso_to_history_hook
     if { ![::lumen::plugin_on SDB] || [info procs $p] eq "" } {
         msg -INFO "Lumen: SDB save hook not found (SDB not installed or not enabled); the bag dots refresh on page show only"
         return
     }
+    set ::lumen::sdb_hooked 1
     if { [lsearch -exact [trace info execution $p] {leave ::lumen::refresh_bag_list}] >= 0 } { return }
     trace add execution $p leave ::lumen::refresh_bag_list
     msg -INFO "Lumen: bag dots follow SDB's shot save"

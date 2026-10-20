@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.3 · a skin for the Decent DE1app · by Blastize
+Version 0.64.4 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,23 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.3 — every page built, baked and running on the tablet.**
+**Version 0.64.4 — every page built, baked and running on the tablet.**
 
-New in 0.64.3: documentation only. The safety notes now say exactly who
+New in 0.64.4: **nothing reaches a plugin that is switched off.** The app
+loads the code of every installed plugin, even the ones you have not
+turned on, so "installed" is not "running". Lumen now asks the app whether
+each plugin is actually on before it talks to it: Grind Advisor's tile and
+estimate, Maintenance Tracker's dot and cleaning banner, DYE's next-shot
+values, Bean Scanner, Shot History Editor and Drink Menu. A plugin that is
+off shows nothing on Lumen, and its button just says it is not loaded. The
+cleaning banner never names a switch-back time that has already passed, and
+its tap does nothing while Maintenance Tracker is off. Opening the theme
+picker on a Dark or Light set no longer looks up sunrise and sunset (the
+schedule line shows the fixed times until you pick Auto). And if you turn
+SDB on while the app runs, the bag dots follow its next shot save without a
+restart.
+
+Earlier, 0.64.3: documentation only. The safety notes now say exactly who
 writes what: Lumen writes only its custom-theme cache; the app's own image
 code still saves rescaled copies of Lumen's shipped art into the skin's
 screen-size folder, as it does for every skin.
@@ -72,7 +86,8 @@ refreshes DYE's next-shot summary, only when that plugin is turned on
 when they are missing or switched off. The app build no longer ships
 the 1340x800 copies of the backgrounds: app updates clear that folder on
 1340x800 tablets anyway, and the app rebuilds it from the 2560x1600 art
-on first use.
+on first use (that is how the app's image code works, and it has done so
+for other skins on my tablet; not yet watched with Lumen).
 
 Earlier, 0.64.1: **the cleaning banner never names a time that has gone.**
 Since Maintenance Tracker 0.32.0, a cleaning run left loaded by an app
@@ -493,8 +508,11 @@ with `Inter-LICENSE.txt` (22 files). Other screen sizes, 1340x800 included,
 get the backgrounds rescaled from 2560x1600 by the app on first use
 (0.64.2: an app update deletes non-standard size folders, so shipping them
 only cost downloads; the `1340x800/` copies stay in this repository for
-hand installs). Lumen is GPL-3.0-or-later (`LICENSE` here; an SPDX line in
-`skin.tcl`).
+hand installs). Known limit: the app never refreshes a rescaled copy, and
+it never clears `1280x800/`, so on a 1280x800 tablet the backgrounds keep
+the look of the Lumen version that first drew them until that folder's
+`lumen_*.png` files are deleted by hand. Lumen is GPL-3.0-or-later
+(`LICENSE` here; an SPDX line in `skin.tcl`).
 
 Then pick it in **Settings → Tablet → (skin list)**.
 

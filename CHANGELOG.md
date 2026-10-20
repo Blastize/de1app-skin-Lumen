@@ -4,6 +4,24 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.4 - Every call into another plugin waits for `plugins loaded`; cleaning-banner guards (pass 22, 2026-10-21) - TABLET-VERIFIED 03:05 (verify.sh PASS run 1)
+
+Base: 0.64.3 (036f6b2). Patch, protocol lane. The parent session's review of 0.64.2-0.64.3, plus the five findings of the
+cleaning-banner-guards session (folded in at its suggestion; it made no edit).
+- `::lumen::plugin_on` now guards every call into Grind Advisor, Maintenance Tracker, DYE, Bean Scanner, Shot History
+  Editor and DrinkMenu too: the grind tile and estimate, the maintenance dot, the cleaning banner and its tap, DYE's
+  staged next_* reads and writes, and every page opener. A peeked-but-disabled plugin is never called; a tap on its
+  button logs "not loaded", as for an absent one.
+- Cleaning banner: MT not enabled = no run (no MT call on the 200 ms tick, so no dirty errorInfo; the tap never loads a
+  profile). An armed back_at that has passed (MT 0.33.0 / 0.33.1, both paths) shows "comes back after the run . Tap ...";
+  profile_filename is an `info exists` test.
+- The sunrise lookup moved from `auto_bounds` to `auto_wanted`: a picker visit on a non-Auto base looks nothing up.
+- SDB enabled mid-session: the next bag-list read attaches its save hook (once). 0.64.1's CHANGELOG time is ~01:02.
+- Tests: pass_22_offline 13/13 (0.64.3 fails 10); pass_13/15/16/17/20 and check_skin adapted (plugin_on, future times).
+  Tablet (every plugin on): log as 0.64.3, no "not loaded"; home and settings identical bar the version and the clock.
+
+**Safety status:** no write behaviour added or changed; fewer calls (none into a plugin that is not enabled).
+
 ## 0.64.3 - Safety notes say who writes what (2026-10-21) - TABLET-VERIFIED 02:28 (verify.sh PASS run 1)
 
 Base: 0.64.2 (7243175). Patch, docs only (comments in skin.tcl, README, CHANGELOG; no code changed), from the parent
@@ -19,40 +37,35 @@ session's review of 0.64.0.
 
 ## 0.64.2 - Startup guards; the build stops shipping 1340x800 (pass 21, 2026-10-21) - TABLET-VERIFIED 02:21 (verify.sh PASS run 1)
 
-Base: 0.64.1 (7d4bb38). Patch, protocol lane (hooks, startup side effects, packaging). John's #369 point 4 plus the
-parent session's review of 0.63.2 (SDB installed but not enabled, the 1340x800 updater churn).
-- Sun: `sun::boot` resolves only when Auto is in force; `sun::ensure` (once per session, from `auto_bounds`) covers a
-  later switch to Auto. `location_start` needs `$::android == 1` (the core's non-Android `borg` stub logs ERROR).
-- `::lumen::plugin_on` = `plugins loaded X`: `plugins init` peeks (sources) every installed plugin, so a disabled SDB
-  has its procs but no settings(db_path) (proven with the real SDB.tcl). The bag list, SDB save hook, chart candidates,
-  bag arrows and DYE summary refresh now ask it first. refresh_bag_list decides before its catch (no empty ERROR).
-- DYE: `dye_hook_install` makes ::plugins::DYE + setup_ui_Lumen only when `plugins available DYE`; on old cores an
-  enabled-but-missing DYE now shows the core's own load error instead of loading empty. `_dye_next_desc` replaces two
-  bare catches; MT's legacy run_started / run_timeout_s are `info exists` tests. The 5 s start is `_deferred_start`.
-- filelist.txt (owner): 22 lines; 1340x800/ out (the updater wipes non-standard size folders in the run that installs
-  them, then re-fetches). The lint refuses any WxH folder but 2560x1600 / 1280x800. history_saved: comment only.
-- Tests: pass_21_offline 25/25 (the 0.64.1 copy fails 21); pass_15/18/19 adapted, pass_20 pinned to MT v0.33.0 (live
-  MT moved on); check_skin scratch trees moved to the system temp folder. Tablet (all plugins on, Auto theme): sun times
-  from Asia/Dubai, DYE styled, SDB hook added, no ERROR; pages pixel-identical to 0.64.1 bar the version and the clock.
+Base: 0.64.1 (7d4bb38). Patch, protocol lane. John's #369 point 4 plus a review of 0.63.2.
+- Sun: `sun::boot` resolves only when Auto is in force, `sun::ensure` once per session after that (0.64.4 moved it to
+  `auto_wanted`: picker visits looked it up too). `location_start` needs `$::android == 1` (the core's borg stub).
+- `::lumen::plugin_on` = `plugins loaded X` (the core peeks every installed plugin; a disabled SDB has its procs but no
+  settings(db_path), proven with the real SDB.tcl): the SDB call sites and DYE's summary refresh ask it first (0.64.4
+  extends it to every plugin call). refresh_bag_list decides before its catch (no empty ERROR).
+- DYE: ::plugins::DYE + setup_ui_Lumen only when `plugins available DYE`; old cores then show their own load error for
+  an enabled-but-missing DYE. Two bare define_next_desc catches and MT's run_started / run_timeout_s catches are tests.
+- filelist.txt (owner): 22 lines, no 1340x800/ (the updater wipes it in the run that installs it); the lint refuses
+  any WxH folder but 2560x1600 / 1280x800. history_saved: comment only.
+- Tests: pass_21_offline 25/25 (0.64.1 fails 21); pass_15/18/19 adapted, pass_20 on MT v0.33.0. Tablet: sun times from
+  Asia/Dubai, DYE styled, SDB hook added, no ERROR; pages identical to 0.64.1 bar the version and the clock.
 
-**Safety status:** no write behaviour added or changed (the custom theme's cache writes are 0.64.0's). Fewer reads: no
-getprop / location for non-Auto users, no SDB or DYE calls while those plugins are off.
+**Safety status:** no write behaviour added or changed. Fewer reads: no getprop / location for non-Auto users at boot,
+no SDB call while SDB is off.
 
-## 0.64.1 - The cleaning banner reads Maintenance Tracker's run_status (pass 20, 2026-10-21) - TABLET-VERIFIED 01:00 (verify.sh PASS run 1); stale banner seen live 01:03
+## 0.64.1 - The cleaning banner reads Maintenance Tracker's run_status (pass 20, 2026-10-21) - TABLET-VERIFIED 01:00 (verify.sh PASS run 1); stale banner seen live ~01:02 (tablet clock)
 
-Base: 0.64.0 (on the tablet). Patch, protocol lane (reads another plugin's API). Since MT 0.32.0 a run left by an app
-restart, or one whose automatic switch-back was skipped, never switches back by itself, yet the banner still computed
-`ts + run_timeout_s` and said "<profile> comes back at 12:29 AM" after that time had gone (tablet, 2026-10-21).
-- With MT 0.33.0+ (`info procs ::plugins::MaintenanceTracker::run_status`), `mt_run` reads MT's public `run_status`:
-  armed "<profile> comes back at <back_at, CLOCK row format> . Tap to switch back now" (no usable back_at: "comes back
-  after the run . Tap ..."), running "comes back after the run", stale "<profile> did not come back . Tap to switch back
-  now", none "Pick your espresso profile before brewing". MT < 0.33.0 keeps the settings(run_restore) path unchanged.
-- The tap is unchanged: MT's public `cancel_profile_run` whenever a run is named (it switches a stale run back too).
-- A `run_status` throw reads as no run and is logged once per distinct error (the banner reads it on the 200 ms tick).
-Tests: pass_20_offline 14/14 with MT's REAL run_status procs (armed / running / stale / none / throw / malformed / old
-MT / measured widths); the 0.64.0 copy fails P20-STALE. check_skin both modes, pass_13-19, check_last_shot, filelist ok.
-Tablet (MT 0.33.1, owner-approved): Start on Backflush - Water -> "comes back at 01:11 AM"; force-stop + relaunch -> "did not
-come back . Tap to switch back now"; the tap -> MT "switched back to 'Gentle and sweet' (cancel)", run_restore {}, banner gone.
+Base: 0.64.0. Patch, protocol lane (reads another plugin's API). Since MT 0.32.0 a run left by an app restart, or one
+whose switch-back was skipped, never switches back by itself, yet the banner computed `ts + run_timeout_s` and said
+"<profile> comes back at 12:29 AM" after that time had gone (tablet, 2026-10-21).
+- With MT 0.33.0+ `mt_run` reads MT's public `run_status`: armed "<profile> comes back at <back_at> . Tap to switch back
+  now" (no usable back_at: "comes back after the run . Tap ..."), running "comes back after the run", stale "<profile>
+  did not come back . Tap to switch back now", none "Pick your espresso profile before brewing". MT < 0.33.0 unchanged.
+- The tap is unchanged (MT's public `cancel_profile_run`, which switches a stale run back too). A `run_status` throw
+  reads as no run and is logged once per distinct error.
+Tests: pass_20_offline 14/14 with MT's REAL run_status procs; the 0.64.0 copy fails P20-STALE. Tablet (MT 0.33.1,
+owner-approved): Start on Backflush - Water -> "comes back at 01:11 AM"; force-stop + relaunch -> "did not come back";
+the tap -> MT "switched back to 'Gentle and sweet' (cancel)", run_restore {}, banner gone.
 
 **Safety status:** no write behaviour added or changed. MT is only read (`run_status`) and called through its public
 `cancel_profile_run` on a tap, as before; nothing of MT's is set. The only file writes remain 0.64.0's custom-theme cache.
