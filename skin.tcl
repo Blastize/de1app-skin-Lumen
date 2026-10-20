@@ -6,8 +6,9 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.1  (the cleaning banner reads Maintenance Tracker's
-#                    run_status; see `variable version`)
+#  Version: 0.64.2  (startup guards: sun lookup only for Auto and only on
+#                    Android, DYE / SDB only when installed and enabled;
+#                    see `variable version`)
 #
 #
 #
@@ -113,7 +114,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.1"
+    variable version "0.64.2"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -526,6 +527,19 @@ proc ::lumen::_skin_data_dir {args} {
     }
     if {![file isdirectory $d]} { file mkdir $d }
     return $d
+}
+
+# 0.64.2 (de1app PR #369 review, point 4): is plugin `name` running? At
+# startup the core sources (peeks) EVERY installed plugin but loads only the
+# enabled ones, so a disabled SDB or DYE still has its procs -- and calling
+# them reaches settings it never set up (SDB: settings(db_path), an ERROR at
+# every home show in a default build, where SDB ships disabled). `plugins
+# loaded` is the core's own answer (both cores, plugins.tcl). With no
+# plugins API at all (headless harnesses) the per-proc checks at each call
+# site decide, as before. Strict 0 / 1; never throws.
+proc ::lumen::plugin_on { name } {
+    if { ![llength [info commands ::plugins]] } { return 1 }
+    return [string is true -strict [plugins loaded $name]]
 }
 
 proc ::lumen::_init_layout {} {
@@ -2761,8 +2775,9 @@ proc ::lumen::auto_time_text { which } {
 
 # ---- 0.59.0 sunrise / sunset --------------------------------------------
 #
-# Position, found ONCE at startup (resolve, called by the boot block before
-# the first palette), in this order:
+# Position, found ONCE per session (resolve, through ensure: at startup only
+# when Auto is in force, else the first time the Auto schedule is read --
+# 0.64.2), in this order:
 #   1. the tablet's time zone (env TZ, else Android's persist.sys.timezone
 #      through getprop) -> that zone's reference point in sun_zones.txt
 #      (IANA zone.tab); an old alias ("Asia/Calcutta") goes through Tcl's
@@ -2781,6 +2796,7 @@ namespace eval ::lumen::sun {
     variable day ""        ;# the local date the cached times belong to
     variable times ""      ;# {rise set} minutes past local midnight | day | night
     variable polls 0
+    variable asked 0       ;# 0.64.2: resolve has run this session (ensure)
 }
 
 # Time zone names to try, first to last. Only a well-formed IANA name
@@ -2916,8 +2932,39 @@ proc ::lumen::sun::resolve {} {
     location_start
 }
 
+# 0.64.2 (de1app PR #369 review, point 4): the position is only looked up
+# for the Auto theme -- once per session, the first time its schedule is
+# needed (auto_bounds: an Auto boot, a switch to Auto, the picker's Auto
+# preview, an Auto set's flip). A Dark / Light / fixed custom user never
+# runs getprop or touches the location service.
+proc ::lumen::sun::ensure {} {
+    variable asked
+    if { $asked } { return }
+    set asked 1
+    if { [catch { resolve } err] } {
+        msg -ERROR "Lumen: sun times: $err"
+    }
+}
+
+# Boot: resolve now only when the theme in force is Auto (its first palette
+# needs today's half); everyone else waits for ensure, or never.
+proc ::lumen::sun::boot {} {
+    if { [::lumen::auto_enabled] } {
+        ensure
+    } else {
+        msg -INFO "Lumen: sun times not looked up (the Auto theme is not in use)"
+    }
+}
+
 proc ::lumen::sun::location_start {} {
     variable polls
+    # 0.64.2: a real AndroWish only. Elsewhere the core installs a `borg`
+    # stub that logs ERROR for every call (utils.tcl), so `info commands
+    # borg` alone is not enough. ::android is set by the core (updater.tcl).
+    if { ![info exists ::android] || $::android != 1 } {
+        msg -NOTICE "Lumen: sun times: not an Android tablet, no location lookup; the fixed Auto times stay in force"
+        return
+    }
     if { ![llength [info commands borg]] } {
         msg -NOTICE "Lumen: sun times: no location service; the fixed Auto times stay in force"
         return
@@ -2991,6 +3038,7 @@ proc ::lumen::sun::describe {} {
 # {light_from dark_from} in force today: sunrise / sunset, else the saved
 # fixed times. Polar days come back as day / night.
 proc ::lumen::auto_bounds {} {
+    ::lumen::sun::ensure
     set s [::lumen::sun::today]
     if { $s eq "" } { return [list [auto_minutes light] [auto_minutes dark]] }
     return $s
@@ -3310,13 +3358,16 @@ proc ::lumen::data::mt_run {} {
     if { ![string equal -nocase $cur [dict get $rr clean_fn]] } { return "" }
     set ts [dict get $rr ts]
     if { ![string is wide -strict $ts] } { return "" }
+    # 0.64.2: MT's variables are tested, not caught (an older MT without
+    # them is expected, and a swallowed error leaves errorInfo dirty).
     set tmo 600
-    catch {
+    if { [info exists ::plugins::MaintenanceTracker::run_timeout_s] } {
         set t $::plugins::MaintenanceTracker::run_timeout_s
         if { [string is wide -strict $t] && $t > 0 } { set tmo $t }
     }
     set state armed
-    catch { if { $::plugins::MaintenanceTracker::run_started } { set state running } }
+    if { [info exists ::plugins::MaintenanceTracker::run_started] \
+      && [string is true -strict $::plugins::MaintenanceTracker::run_started] } { set state running }
     # 0.62.0 (F21): in the CLOCK row's 12/24 h ("08:17 PM"); it was always
     # 24 h, whatever the taskbar showed.
     return [dict create state $state prev_title [dict get $rr prev_title] \
@@ -3569,11 +3620,15 @@ proc ::lumen::stages_shown {} {
 
 proc ::lumen::refresh_bag_list { args } {
     variable bag_list
+    # 0.64.2: SDB missing or not enabled is decided BEFORE the catch: a
+    # `return` inside catch is code 2, which logged an empty "could not read
+    # the bag list: " ERROR at every home show; and a peeked-but-disabled SDB
+    # failed on its unset db_path.
+    if { ![::lumen::plugin_on SDB] || [info procs ::plugins::SDB::available_categories] eq "" } {
+        set bag_list {}
+        return
+    }
     if { [catch {
-        if { [info procs ::plugins::SDB::available_categories] eq "" } {
-            set bag_list {}
-            return
-        }
         set bags [::plugins::SDB::available_categories bean_desc 1 {} 0]
         # Drop blanks: a shot saved with no bean fields yields an empty
         # bean_desc, and a dot for it would be a dot you cannot reach.
@@ -3714,7 +3769,7 @@ proc ::lumen::last_shot_candidates { {bag ""} } {
     set dir [file join [::lumen::data_root] history]
     if { ![file isdirectory $dir] } { return {} }
 
-    if { [info procs ::plugins::SDB::shots] ne "" \
+    if { [::lumen::plugin_on SDB] && [info procs ::plugins::SDB::shots] ne "" \
       && [info procs ::plugins::SDB::string2sql] ne "" } {
         set bev "COALESCE(beverage_type,'') NOT IN ('cleaning','calibrate')"
         set filters {}
@@ -4018,6 +4073,9 @@ proc ::lumen::_load_shot_file { path strict } {
     # written to history". Having just read them OUT of history, that is
     # exactly true. reset_gui_starting_espresso sets it back to 0 when a real
     # shot starts (machine.tcl:846), so a genuine shot still saves normally.
+    # (Line numbers above are the tablet's stable core. In de1app main the
+    # guard is vars.tcl:3670, writing [data_directory]/history, and the reset
+    # is machine.tcl:917 -- the same logic, checked 2026-10-21.)
     if { [catch { set ::settings(history_saved) 1 } err] } {
         msg -ERROR "Lumen: could not mark the loaded shot as already saved: $err"
     }
@@ -4774,8 +4832,18 @@ proc ::lumen::act::adjust_grind { delta } {
         return
     }
     # DYE keeps a human-readable summary of the next shot; refresh it the way
-    # its own stepper does. Absent or old DYE: nothing to refresh.
-    catch { ::plugins::DYE::shots::define_next_desc }
+    # its own stepper does. Absent, disabled or old DYE: nothing to refresh.
+    _dye_next_desc
+}
+
+# 0.64.2: the one DYE summary refresh both steppers use. Absent, disabled
+# or old DYE is tested, not caught (a swallowed error left errorInfo dirty
+# for the core's BLE error line); a real failure is logged.
+proc ::lumen::act::_dye_next_desc {} {
+    if { ![::lumen::plugin_on DYE] || [info procs ::plugins::DYE::shots::define_next_desc] eq "" } { return }
+    if { [catch { ::plugins::DYE::shots::define_next_desc } err] } {
+        msg -ERROR "Lumen: DYE's next-shot summary did not refresh: $err"
+    }
 }
 
 # ---- machine steppers (Lumen settings page) -------------------------------
@@ -4977,7 +5045,7 @@ proc ::lumen::act::adjust_dose { delta } {
         msg -ERROR "Lumen: could not change the dose: $err"
         return
     }
-    catch { ::plugins::DYE::shots::define_next_desc }
+    _dye_next_desc
 }
 
 proc ::lumen::act::_write_yield { new } {
@@ -5148,6 +5216,7 @@ proc ::lumen::act::open_drinkmenu {} {
 #      the plan comes from it; the chart does not (real = 0).
 # Read only: SDB's public read API plus reads of history/ files.
 proc ::lumen::act::_bag_source { bag } {
+    if { ![::lumen::plugin_on SDB] } { error "the SDB plugin is not enabled" }
     if { [info procs ::plugins::SDB::shots] eq "" \
       || [info procs ::plugins::SDB::string2sql] eq "" } {
         error "the SDB plugin has no shot query"
@@ -5194,10 +5263,10 @@ proc ::lumen::act::cycle_bag { dir } {
     # with an empty message (found by the SHE Bags-view review, 2026-10-02).
     # Only code 1 is an error.
     if { [catch {
-        if { [info procs ::plugins::SDB::available_categories] eq "" } {
+        if { ![::lumen::plugin_on SDB] || [info procs ::plugins::SDB::available_categories] eq "" } {
             error "the SDB plugin is not loaded"
         }
-        if { [info procs ::plugins::DYE::shots::source_next_from] eq "" } {
+        if { ![::lumen::plugin_on DYE] || [info procs ::plugins::DYE::shots::source_next_from] eq "" } {
             error "the DYE plugin is not loaded"
         }
 
@@ -7326,7 +7395,8 @@ catch {
 }
 # 0.59.0: the Auto schedule's sunrise / sunset position, before the first
 # palette picks a half. Logged, never fatal: the fixed times remain.
-if { [catch { ::lumen::sun::resolve } err] } {
+# 0.64.2: only when Auto is in force (sun::boot); otherwise lazily, or never.
+if { [catch { ::lumen::sun::boot } err] } {
     msg -ERROR "Lumen: sun times: $err"
 }
 ::lumen::set_palette $::lumen::theme_mode
@@ -8944,14 +9014,27 @@ after 60000 ::lumen::auto_tick
 # and `proc ::plugins::DYE::...` would fail with "unknown namespace". Creating
 # it here is safe and additive: DYE's own `namespace eval ::plugins::DYE`
 # extends it, and the plugin framework's peek only adds variables to it.
-namespace eval ::plugins::DYE {}
-
-proc ::plugins::DYE::setup_ui_Lumen {} {
-    dui theme add DYE_Lumen
-    dui theme set DYE_Lumen
-    ::lumen::dye_aspects
-    msg -INFO "Lumen: DYE styled with the DYE_Lumen theme"
+# DYE themes a skin by calling ::plugins::DYE::setup_ui_<skin> when it
+# exists (DYE.tcl, `namespace which`).
+# 0.64.2 (de1app PR #369 review, point 4): only when DYE is installed
+# (`plugins available`, which globs the plugins folder; `loaded` would be
+# too early, plugins init runs after the skin). Without it no ::plugins::DYE
+# namespace is made, so an old core never reports an absent DYE as loaded.
+proc ::lumen::dye_hook_install {} {
+    if { ![llength [info commands ::plugins]] || ![string is true -strict [plugins available DYE]] } {
+        msg -INFO "Lumen: DYE not installed; no DYE theme hook"
+        return 0
+    }
+    namespace eval ::plugins::DYE {}
+    proc ::plugins::DYE::setup_ui_Lumen {} {
+        dui theme add DYE_Lumen
+        dui theme set DYE_Lumen
+        ::lumen::dye_aspects
+        msg -INFO "Lumen: DYE styled with the DYE_Lumen theme"
+    }
+    return 1
 }
+::lumen::dye_hook_install
 
 # The DYE_Lumen aspects from the CURRENT palette. 0.48.0: split out of the
 # hook so a live theme change can set them again before the DYE pages are
@@ -9089,16 +9172,22 @@ bind Canvas <KeyPress> {handle_keypress %k}
 
 # Deferred: the BLT vectors are created during app setup, which has not
 # finished while the skin is being sourced. Five seconds is comfortably after
-# startup and long before anyone pulls a shot.
-after 5000 {
+# startup and long before anyone pulls a shot. The bag list and SDB's save
+# hook wait for the same reason: SDB is a plugin and has not finished
+# loading while the skin is being sourced. 0.64.2: each step in its own
+# logged catch, so one failing never skips the others or reaches bgerror.
+proc ::lumen::_deferred_start {} {
     if { [catch { ::lumen::load_last_shot_curves } err] } {
         msg -ERROR "Lumen: loading the last shot curves failed: $err"
     }
-    # Same deferral, same reason: SDB is a plugin and has not finished
-    # loading while the skin is being sourced.
-    ::lumen::refresh_bag_list
-    ::lumen::hook_sdb_save
+    if { [catch { ::lumen::refresh_bag_list } err] } {
+        msg -ERROR "Lumen: the first bag list read failed: $err"
+    }
+    if { [catch { ::lumen::hook_sdb_save } err] } {
+        msg -ERROR "Lumen: could not follow SDB's shot save: $err"
+    }
 }
+after 5000 ::lumen::_deferred_start
 
 # 0.57.4: the bag list also follows SDB's own save. The page-show refresh
 # below fires the moment a shot ends, but SDB writes the new row later --
@@ -9109,8 +9198,8 @@ after 5000 {
 # on both paths re-reads once the row exists; one query per saved shot.
 proc ::lumen::hook_sdb_save {} {
     set p ::plugins::SDB::save_espresso_to_history_hook
-    if { [info procs $p] eq "" } {
-        msg -INFO "Lumen: SDB save hook not found; the bag dots refresh on page show only"
+    if { ![::lumen::plugin_on SDB] || [info procs $p] eq "" } {
+        msg -INFO "Lumen: SDB save hook not found (SDB not installed or not enabled); the bag dots refresh on page show only"
         return
     }
     if { [lsearch -exact [trace info execution $p] {leave ::lumen::refresh_bag_list}] >= 0 } { return }

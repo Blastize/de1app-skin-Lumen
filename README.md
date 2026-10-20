@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.1 · a skin for the Decent DE1app · by Blastize
+Version 0.64.2 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,20 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.1 — every page built, baked and running on the tablet.**
+**Version 0.64.2 — every page built, baked and running on the tablet.**
 
-New in 0.64.1: **the cleaning banner never names a time that has gone.**
+New in 0.64.2: **quiet with the plugins you don't use.** Lumen now looks
+up sunrise and sunset only if you use the Auto theme, and asks the
+tablet for its location only on a real Android tablet. It prepares DYE's
+theme only when DYE is installed. It reads your bean bags from SDB, and
+refreshes DYE's next-shot summary, only when that plugin is turned on
+(a new app install has SDB but leaves it off), so nothing logs an error
+when they are missing or switched off. The app build no longer ships
+the 1340x800 copies of the backgrounds: app updates clear that folder on
+1340x800 tablets anyway, and the app rebuilds it from the 2560x1600 art
+on first use.
+
+Earlier, 0.64.1: **the cleaning banner never names a time that has gone.**
 Since Maintenance Tracker 0.32.0, a cleaning run left loaded by an app
 restart (or one Maintenance Tracker could not safely switch back from)
 stays loaded until you switch back yourself, but the banner still said
@@ -469,10 +480,14 @@ de1plus/skins/Lumen/fonts/
 ```
 
 Inside the app (the de1app build), Lumen ships exactly the files listed in
-`filelist.txt`: `skin.tcl`, `sun_zones.txt`, the icons and backgrounds in
-`1280x800/`, `1340x800/` and `2560x1600/`, and `fonts/Inter-*` with
-`Inter-LICENSE.txt`. Lumen is GPL-3.0-or-later (`LICENSE` here; an SPDX
-line in `skin.tcl`).
+`filelist.txt`: `skin.tcl`, `sun_zones.txt`, the skin-picker icon in
+`1280x800/`, the icon and backgrounds in `2560x1600/`, and `fonts/Inter-*`
+with `Inter-LICENSE.txt` (22 files). Other screen sizes, 1340x800 included,
+get the backgrounds rescaled from 2560x1600 by the app on first use
+(0.64.2: an app update deletes non-standard size folders, so shipping them
+only cost downloads; the `1340x800/` copies stay in this repository for
+hand installs). Lumen is GPL-3.0-or-later (`LICENSE` here; an SPDX line in
+`skin.tcl`).
 
 Then pick it in **Settings → Tablet → (skin list)**.
 
@@ -613,7 +628,8 @@ screen before your finger lifts (0.47.0). The picker's **Auto** base
 `lumen_custom_base` = auto; since 0.59.0 light from sunrise to sunset
 (`::lumen::sun`: the time zone's reference point from `sun_zones.txt`,
 IANA zone.tab, else Android location held in memory; NOAA solar
-formulas), with `lumen_auto_light_from` / `lumen_auto_dark_from`
+formulas; since 0.64.2 looked up only while Auto is in use, and the
+location only on a real Android tablet), with `lumen_auto_light_from` / `lumen_auto_dark_from`
 (minutes past midnight) only as the fallback; both halves are drawn
 (`_custom` and `_customl` files) and a minute tick swaps them on the
 home or saver page while the machine is idle. Every item a Lumen helper

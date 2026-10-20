@@ -4,6 +4,27 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.2 - Startup guards; the build stops shipping 1340x800 (pass 21, 2026-10-21) - TABLET-VERIFIED 02:21 (verify.sh PASS run 1)
+
+Base: 0.64.1 (7d4bb38). Patch, protocol lane (hooks, startup side effects, packaging). John's #369 point 4 plus the
+parent session's review of 0.63.2 (SDB installed but not enabled, the 1340x800 updater churn).
+- Sun: `sun::boot` resolves only when Auto is in force; `sun::ensure` (once per session, from `auto_bounds`) covers a
+  later switch to Auto. `location_start` needs `$::android == 1` (the core's non-Android `borg` stub logs ERROR).
+- `::lumen::plugin_on` = `plugins loaded X`: `plugins init` peeks (sources) every installed plugin, so a disabled SDB
+  has its procs but no settings(db_path) (proven with the real SDB.tcl). The bag list, SDB save hook, chart candidates,
+  bag arrows and DYE summary refresh now ask it first. refresh_bag_list decides before its catch (no empty ERROR).
+- DYE: `dye_hook_install` makes ::plugins::DYE + setup_ui_Lumen only when `plugins available DYE`; on old cores an
+  enabled-but-missing DYE now shows the core's own load error instead of loading empty. `_dye_next_desc` replaces two
+  bare catches; MT's legacy run_started / run_timeout_s are `info exists` tests. The 5 s start is `_deferred_start`.
+- filelist.txt (owner): 22 lines; 1340x800/ out (the updater wipes non-standard size folders in the run that installs
+  them, then re-fetches). The lint refuses any WxH folder but 2560x1600 / 1280x800. history_saved: comment only.
+- Tests: pass_21_offline 25/25 (the 0.64.1 copy fails 21); pass_15/18/19 adapted, pass_20 pinned to MT v0.33.0 (live
+  MT moved on); check_skin scratch trees moved to the system temp folder. Tablet (all plugins on, Auto theme): sun times
+  from Asia/Dubai, DYE styled, SDB hook added, no ERROR; pages pixel-identical to 0.64.1 bar the version and the clock.
+
+**Safety status:** no write behaviour added or changed (the custom theme's cache writes are 0.64.0's). Fewer reads: no
+getprop / location for non-Auto users, no SDB or DYE calls while those plugins are off.
+
 ## 0.64.1 - The cleaning banner reads Maintenance Tracker's run_status (pass 20, 2026-10-21) - TABLET-VERIFIED 01:00 (verify.sh PASS run 1); stale banner seen live 01:03
 
 Base: 0.64.0 (on the tablet). Patch, protocol lane (reads another plugin's API). Since MT 0.32.0 a run left by an app
