@@ -5,8 +5,8 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.62.2  (the bag cycler never sources a soft-deleted shot and
-#                    reports a switch only when DYE's plan really moved;
+#  Version: 0.63.0  (the starting estimate follows GrindAdvisor's grinder
+#                    recalibration log and shows its likely range;
 #                    see `variable version`)
 #
 #
@@ -108,7 +108,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.62.2"
+    variable version "0.63.0"
 
     variable C        ;# colour tokens
     array set C {}
@@ -787,6 +787,9 @@ proc ::lumen::_init_layout {} {
     # dot, U+25CF at the caption size, is 15 px wide in Inter; the rest is
     # a word space).
     set L(band_dot_dx)  22
+    # 0.63.0: the footer's text budget from gx (40): "Curve" (anchor ne at
+    # 512, 43 px at the caption size) starts near 469, less an lg gap.
+    set L(grind_band_w) 400
 
     set L(pad_x)     24        ;# inner padding of a tile
     set L(pad_y)     20
@@ -1433,36 +1436,73 @@ proc ::lumen::data::_g { rec key {default ""} } {
 # 200 ms tick (GrindAdvisor README, v3.7.0); the one SDB read happens on
 # the first tick after the key changes, then the dict is served from here.
 # A cached MISS ({}) is cached too, or a bag with no candidates would
-# re-read SDB five times per second. The cache never needs invalidating
-# beyond the key change: the moment the bag gets its first shot,
-# recommendation_for_current_bag returns a real rec, every accessor
+# re-read SDB five times per second. The moment the bag gets its first
+# shot, recommendation_for_current_bag returns a real rec, every accessor
 # prefers it, and the estimate is simply never consulted again.
+#
+# 0.63.0: the key alone went stale. GrindAdvisor 3.26.0 reads every bag on
+# today's grinder dial through its recalibration log,
+# settings(grinder_recal), which its "Grinder recalibrated" page writes on
+# Save and Remove -- and after either the tile kept the old "Start ~X"
+# until the bag changed or the app restarted. The cache now holds the log
+# it was computed under too (_recal_sig: a variable read, never SDB), so
+# the first tick after a Save or Remove makes the one SDB read again.
 namespace eval ::lumen::data {
     variable est_key ""
+    variable est_sig ""
     variable est_val {}
+    variable est_note ""
 }
 
-proc ::lumen::data::grind_est {} {
+# GrindAdvisor's recalibration log as the estimate sees it: "-" while the
+# setting has never been written (GrindAdvisor's owner seed applies then),
+# else "=" and the stored list. Unset, or set to the empty list by a last
+# Remove, are different logs and so different signatures.
+proc ::lumen::data::_recal_sig {} {
+    if { ![info exists ::plugins::GrindAdvisor::settings(grinder_recal)] } { return "-" }
+    return "=$::plugins::GrindAdvisor::settings(grinder_recal)"
+}
+
+# {estimate note}: the estimate dict or {}, and -- only when it is {} --
+# GrindAdvisor 3.26.0's starting_estimate_note ("" unless a recalibration
+# of unknown size left no start). The note is the plugin's state after
+# ITS last starting_estimate call, so it is read right after this one and
+# cached with it.
+proc ::lumen::data::_est {} {
     variable est_key
+    variable est_sig
     variable est_val
-    if { [info procs ::plugins::GrindAdvisor::starting_estimate] eq "" } { return {} }
-    if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {} }
-    if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {} }
-    if { $ck eq "" } { return {} }
-    if { $ck eq $est_key } { return $est_val }
+    variable est_note
+    if { [info procs ::plugins::GrindAdvisor::starting_estimate] eq "" } { return {{} {}} }
+    if { [info procs ::plugins::GrindAdvisor::current_bag_key] eq "" } { return {{} {}} }
+    if { [catch { set ck [::plugins::GrindAdvisor::current_bag_key] }] } { return {{} {}} }
+    if { $ck eq "" } { return {{} {}} }
+    set sig [_recal_sig]
+    if { $ck eq $est_key && $sig eq $est_sig } { return [list $est_val $est_note] }
     set est_key $ck
+    set est_sig $sig
     set est_val {}
+    set est_note ""
     if { [catch { set e [::plugins::GrindAdvisor::starting_estimate] } err] } {
         msg -ERROR "Lumen: starting_estimate failed: $err"
-        return {}
+        return {{} {}}
     }
     if { $e ne "" && ![catch { dict size $e }] \
       && [dict exists $e grind] && [dict exists $e label] \
       && [dict exists $e reason] } {
         set est_val $e
     }
-    return $est_val
+    if { $est_val eq "" && [info procs ::plugins::GrindAdvisor::starting_estimate_note] ne "" } {
+        if { [catch { set est_note [::plugins::GrindAdvisor::starting_estimate_note] } err] } {
+            msg -ERROR "Lumen: starting_estimate_note failed: $err"
+            set est_note ""
+        }
+    }
+    return [list $est_val $est_note]
 }
+
+proc ::lumen::data::grind_est {} { return [lindex [_est] 0] }
+proc ::lumen::data::grind_est_note {} { return [lindex [_est] 1] }
 
 # The tile's header label. Static "RECOMMENDED GRIND" until 0.38.0, now an
 # accessor purely so an estimate is never captioned "Recommended"
@@ -1546,6 +1586,31 @@ proc ::lumen::data::grind_method {} {
     return ""
 }
 
+# 0.63.0: a starting estimate's footer. GrindAdvisor 3.26.0 adds the band
+# its source bags spread over (band_lo / band_hi, ~80%), so the footer says
+# "Likely 6.4 to 9.9 . same roaster (4 bags)" -- the header, the chip and
+# the hero's "~" already say "estimate", which is all the old
+# "Starting estimate: ..." added. Never "Recommended" (GrindAdvisor's
+# contract for estimates). Without the band keys (an older GrindAdvisor),
+# or with junk in them, the reason as before. Measured into the footer's
+# budget, grind_band_w. Inter 16 px +3% (the tablet's advances): "Likely
+# 7.1 to 9.7 . this profile (6 bags)" 282 px, as wide as the reason it
+# replaces (286); "Likely 16.25 to 19.75 . same roaster (12 bags)" 347.
+proc ::lumen::data::_est_footer { est } {
+    set s [dict get $est reason]
+    if { [dict exists $est band_lo] && [dict exists $est band_hi] } {
+        set lo [_grind_num [dict get $est band_lo]]
+        set hi [_grind_num [dict get $est band_hi]]
+        if { $lo ne "--" && $hi ne "--" && $lo ne $hi } {
+            set s "[translate Likely] $lo [translate to] $hi"
+            if { [dict exists $est rung_txt] && [dict get $est rung_txt] ne "" } {
+                append s " [::lumen::glyph dot] [dict get $est rung_txt]"
+            }
+        }
+    }
+    return [::lumen::_fit_text $s $::lumen::L(font_caption) $::lumen::L(grind_band_w) 48]
+}
+
 # The footer: how many shots the number stands on, beside the confidence
 # dot -- "4 of 5 shots on this bag" when GrindAdvisor left an off-target
 # shot out of the fit (its n against bag_shot), "1 shot on this bag" on a
@@ -1555,10 +1620,14 @@ proc ::lumen::data::grind_band {} {
     set rec [grind_rec]
     if { $rec eq "" } {
         # 0.38.0: GrindAdvisor's reason string names the estimate's source
-        # rung -- "Starting estimate: same roaster (4 bags)". Worst case is
-        # 44 chars; the 48 ellipsis is a guard, not a working truncation.
+        # rung -- "Starting estimate: same roaster (4 bags)". 0.63.0: with
+        # GrindAdvisor 3.26.0's band, the likely range instead (_est_footer).
         set est [grind_est]
-        if { $est ne "" } { return [_ellipsis [dict get $est reason] 48] }
+        if { $est ne "" } { return [_est_footer $est] }
+        # 0.63.0: no start because a recalibration's size is unknown. The
+        # tile names why in Lumen's words; GrindAdvisor's full note (and
+        # what to do about it) is in its popup, one tap away.
+        if { [grind_est_note] ne "" } { return [translate "Start unknown: grinder recalibrated"] }
         return ""
     }
     set n  [_g $rec n]

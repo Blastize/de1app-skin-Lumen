@@ -4,6 +4,24 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.63.0 - The starting estimate follows GrindAdvisor's recalibration log and shows its range (pass 16, 2026-10-15) - TABLET-VERIFIED 23:19 (verify.sh PASS run 1)
+
+Base: 0.62.2 (on the tablet). Minor, protocol lane (the estimate cache on the 200 ms tick). For GrindAdvisor
+3.26.0, whose starting_estimate reads every bag on today's dial through settings(grinder_recal).
+- Fix: `grind_est` cached per bag key only, so after a Save / Remove on GA's "Grinder recalibrated" page the
+  tile kept the old "Start ~X" until the bag changed or the app restarted. The cache now also holds
+  `_recal_sig` ("-" never written, else "=" + the list: one variable read, never SDB); a change makes the
+  one starting_estimate call again. `_est` returns {estimate note}; `grind_est` / `grind_est_note` read it.
+- Footer: with band_lo / band_hi (read with dict exists), "Likely 7.1 to 9.7 . this profile (6 bags)"
+  (GA's rung_txt) replaces "Starting estimate: ..."; older GA, junk or lo = hi keep the reason. Measured into
+  the new token grind_band_w 400 (Inter 16: 282 px typical, 347 widest). No start and a
+  starting_estimate_note (behind `info procs`): "Start unknown: grinder recalibrated"; GA's popup has the rest.
+- Tests: pass_16_offline.tcl 18/18 against the REAL GrindAdvisor 3.26.0 and its page's `_store` (0.62.2
+  fails 8, P16-SAVE among them: "~3.5" stays after the +5.0 Save). check_skin H gains 4 recal-cache pins.
+
+**Safety status:** no new write and no write path changed. Reads: one more variable on the tick
+(GrindAdvisor's settings(grinder_recal), read only); starting_estimate still once per bag key or log change.
+
 ## 0.62.2 - The bag cycler never sources a soft-deleted shot (pass 15, 2026-10-15) - TABLET-VERIFIED 17:41 (verify.sh PASS run 3)
 
 Verify: run 1 FAIL on checks authoring (the Write tool stored "U+F011" as a raw glyph; checks.py reads

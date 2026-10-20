@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.62.2 · a skin for the Decent DE1app · by Blastize
+Version 0.63.0 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,24 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.62.2 — every page built, baked and running on the tablet.**
+**Version 0.63.0 — every page built, baked and running on the tablet.**
 
-New in 0.62.2: **the bag arrows switch the bag, or say they could not.**
+New in 0.63.0: **a new bag's starting estimate follows a grinder
+recalibration, and shows its likely range.** Grind Advisor 3.26.0 keeps a
+log of grinder recalibrations (Advanced > Shot data > Grinder recalibrated)
+and puts every older bag on today's dial before it suggests where a new bag
+should start. Until now the grind tile kept the start it had worked out
+before you saved or removed an entry there, up to the next bag change or
+app restart; it now picks up the new start on the next screen refresh. The
+tile's bottom line names the range the start is likely to fall in, where
+it came from: "Likely 7.1 to 9.7 · this profile (6 bags)". With an older
+Grind Advisor it still reads "Starting estimate: ...". When Grind Advisor
+cannot give a start because a recalibration's size is unknown, the line
+reads "Start unknown: grinder recalibrated"; tap the tile for Grind
+Advisor's full note and what to do about it. The tile never calls an
+estimate "Recommended".
+
+Earlier, 0.62.2: **the bag arrows switch the bag, or say they could not.**
 If you put a bag's newest shot in the Shot History Editor's trash, the
 arrows on the next-shot strip could no longer move onto that bag: the chart
 showed the bag, but the bean name, the dots and the grind tile stayed on the
