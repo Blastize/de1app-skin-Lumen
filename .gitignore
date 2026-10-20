@@ -26,6 +26,13 @@ logs/
 log/
 *.bak
 
+# Custom-theme art the skin draws on the tablet (custom::ensure_bake):
+# generated per device, never committed, never in filelist.txt
+*_custom.png
+*_customl.png
+*.sig
+*.baking
+
 # Version archives
 *Archive/
 

@@ -4,6 +4,25 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.63.2 - filelist.txt for the de1app build; Noto Sans Mono from Streamline (pass 18, 2026-10-21) - TABLET-VERIFIED 00:16 (verify.sh PASS run 1)
+
+Base: 0.63.1 (on the tablet; 0.63.0 and 0.63.1 now committed). Patch, protocol lane (packaging + startup font source), from John
+Buckman's review of de1app PR #369. The list and the loader land together: the list no longer ships Lumen's NotoSansMono.
+- filelist.txt (37 lines, LF, no BOM, sorted): skin.tcl, sun_zones.txt, 1280x800/icon.jpg, all 15 files of 1340x800/ and of
+  2560x1600/, fonts/Inter-{Regular,SemiBold,Bold}.ttf + Inter-LICENSE.txt (OFL). Out: docs, README / CHANGELOG / PROJECT_STATE,
+  LICENSE (owner: an SPDX GPL-3.0-or-later line in skin.tcl instead), tools/, generated art, NotoSansMono (kept in the repo for
+  hand installs, owner). .gitignore gains *_custom.png, *_customl.png, *.sig, *.baking.
+- `_load_font_families`, per family: Noto Sans Mono from skins/Streamline (both cores' misc.tcl ship it; byte-identical), then
+  Lumen fonts/, then Courier; Inter from Lumen fonts/, then skins/Streamline, then Helvetica. `file exists` before
+  add_or_get_familyname (no dui WARN), one NOTICE per face that falls back, one INFO "Lumen: fonts: ..." per boot.
+- Tests: pass_18_offline 25/25 (font layouts, register failures, 17 broken lists the new tools/check_filelist.tcl rejects;
+  the 0.63.1 loader fails P18-TABLET). Tablet: dui logs skins/Streamline/NotoSansMono-*.ttf; the settings page's 42 text
+  items are pixel-identical to a same-night 0.63.1 capture, bar the version. README: 0.63.1 note and Custom glass corrected.
+
+**Safety status:** no write behaviour added or changed. Reads: one `file exists` per font candidate under [homedir]/skins
+(the code root; upstream homedir = source_directory). No data path changed, so this pass has no data_directory branch. The
+only file writes stay the custom theme's PNG / sig / marker in skins/Lumen/<WxH>/ (to move in 0.64.0).
+
 ## 0.63.1 - The starting estimate follows the bag's notes (pass 17, 2026-10-16) - TABLET-VERIFIED 13:34 (verify.sh PASS run 1)
 
 Base: 0.63.0 (on the tablet). Patch, protocol lane (the estimate cache on the 200 ms tick). For GrindAdvisor

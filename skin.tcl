@@ -5,8 +5,9 @@ package require de1plus 1.0
 #  LUMEN  --  a glass dashboard skin for the Decent DE1
 #
 #  Author:  Blastize
-#  Version: 0.63.1  (the starting estimate also follows the bag's notes,
-#                    GrindAdvisor 3.28.0's same-origin source;
+#  SPDX-License-Identifier: GPL-3.0-or-later
+#  Version: 0.63.2  (filelist.txt for the de1app build; Noto Sans Mono from
+#                    the app's skins/Streamline copy first;
 #                    see `variable version`)
 #
 #
@@ -108,7 +109,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.63.1"
+    variable version "0.63.2"
 
     variable C        ;# colour tokens
     array set C {}
@@ -1012,28 +1013,45 @@ proc ::lumen::_load_font_families {} {
         if { $fam ne "" } { set F(symbol) $fam ; set F(symbol_ok) 1 }
     }
 
-    set dir "[homedir]/skins/Lumen/fonts"
-
-    foreach {key file} {
-        sans      Inter-Regular.ttf
-        sans_semi Inter-SemiBold.ttf
-        sans_bold Inter-Bold.ttf
-        mono      NotoSansMono-SemiBold.ttf
-        mono_bold NotoSansMono-ExtraBold.ttf
-    } {
-        if { [catch {
-            set fam [::dui::font::add_or_get_familyname [file join $dir $file]]
-        } err] } {
-            msg -NOTICE "Lumen: could not register $file ($err); falling back"
-            continue
-        }
-        if { $fam ne "" } {
+    # 0.63.2 (de1app PR #369 review): Noto Sans Mono comes from the copy the
+    # app already ships for Streamline (both cores' misc.tcl package
+    # skins/Streamline/NotoSansMono-*.ttf; byte-identical to Lumen's), so a
+    # de1app build carries one copy. Lumen's own fonts/ copy is the second
+    # choice (standalone installs, tablets that still have it). Inter keeps
+    # Lumen's own build first; Streamline's Inter is a different build of
+    # the same family and only a fallback. A candidate is offered to dui
+    # only when its file exists (no "can't find font file" WARN); one INFO
+    # line names where each family came from.
+    set own [list [file join [homedir] skins Lumen fonts] "Lumen fonts/"]
+    set app [list [file join [homedir] skins Streamline] "Streamline"]
+    set where {}
+    foreach {key file dirs} [list \
+        sans      Inter-Regular.ttf          [list $own $app] \
+        sans_semi Inter-SemiBold.ttf         [list $own $app] \
+        sans_bold Inter-Bold.ttf             [list $own $app] \
+        mono      NotoSansMono-SemiBold.ttf  [list $app $own] \
+        mono_bold NotoSansMono-ExtraBold.ttf [list $app $own] ] {
+        set why {}
+        foreach cand $dirs {
+            lassign $cand dir src
+            set path [file join $dir $file]
+            if { ![file exists $path] } { lappend why "$src: no file" ; continue }
+            if { [catch { set fam [::dui::font::add_or_get_familyname $path] } err] } {
+                lappend why "$src: $err"
+                continue
+            }
+            if { $fam eq "" } { lappend why "$src: no family name" ; continue }
             set F($key) $fam
             set F(${key}_ok) 1
-        } else {
-            msg -NOTICE "Lumen: no family name for $file; falling back"
+            lappend where "$file from $src"
+            break
+        }
+        if { !$F(${key}_ok) } {
+            msg -NOTICE "Lumen: $file not registered ([join $why {; }]); falling back to $F($key)"
+            lappend where "$file -> $F($key)"
         }
     }
+    msg -INFO "Lumen: fonts: [join $where {, }]"
 
     # Several weights of one typeface can register under a SINGLE family
     # name. On this tablet Inter-Bold.ttf reports family "Inter" -- exactly
@@ -1456,6 +1474,10 @@ proc ::lumen::data::_g { rec key {default ""} } {
 # The signature now holds the notes too (_notes_sig, again one variable
 # read): one SDB read per notes edit, none while they stay the same. Not
 # the estimate's `origin` key -- that is only known after the call.
+# GrindAdvisor 3.29.0 removed the origin rung again: the notes no longer
+# move the estimate, so a notes edit now costs one redundant read with an
+# identical answer. Kept: harmless, and right again should the estimate
+# ever read the notes.
 namespace eval ::lumen::data {
     variable est_key ""
     variable est_sig ""

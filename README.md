@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.63.1 · a skin for the Decent DE1app · by Blastize
+Version 0.63.2 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -41,7 +41,7 @@ Copy the folder to `de1plus/skins/Lumen/`, restart the app, pick **Lumen** under
 
 ## Safety
 
-Lumen writes only the app's own settings through the app's own calls (temperatures, volumes, its theme and favorite slots). It never touches shot files or the shot database and never starts a flow on its own.
+Lumen writes only the app's own settings through the app's own calls (temperatures, volumes, its theme and favorite slots), plus, on a custom theme, the backgrounds it paints into its own folder. It never touches shot files or the shot database and never starts a flow on its own.
 
 <details>
 <summary><b>Full reference and version notes</b></summary>
@@ -56,16 +56,25 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.63.1 — every page built, baked and running on the tablet.**
+**Version 0.63.2 — every page built, baked and running on the tablet.**
 
-New in 0.63.1: **a new bag's starting estimate follows its notes.** Grind
-Advisor 3.28.0 can start a new bag from your bags of the same origin when
-the bag's notes name its country ("Ethiopia"). If you typed the bean name
-first and the notes after, the grind tile kept the start it had worked out
-without the notes until the bag changed, while Grind Advisor's popup
-already had the new one. The tile now picks up a notes change on the next
-screen refresh, so it and the popup show the same start, range and source
-(for example "same origin (Ethiopia, 3 bags)").
+New in 0.63.2: **ready to ship with the app.** Lumen now has a
+`filelist.txt`, the list the de1app build uses to pick which skin files go
+into the app: the skin code, the sunrise table, the pre-drawn backgrounds
+for 1340x800 and 2560x1600, the skin-picker icons, and the Inter fonts
+with their licence. Docs, screenshots and dev tools stay out. The number
+font, Noto Sans Mono, now comes from the copy the app already ships with
+its Streamline skin (the same file, byte for byte), so the app carries it
+once; Lumen's own copy is only a fallback for hand installs. Nothing looks
+different.
+
+Earlier, 0.63.1: **a new bag's starting estimate follows its notes.** Grind
+Advisor 3.28.0 could start a new bag from your bags of the same origin when
+the bag's notes named its country, and the grind tile now picks up a notes
+change on the next screen refresh, as Grind Advisor's popup does. Grind
+Advisor 3.29.0 dropped the origin step again, so today the notes do not
+move the start; the tile still refreshes when they change, which costs
+nothing.
 
 Earlier, 0.63.0: **a new bag's starting estimate follows a grinder
 recalibration, and shows its likely range.** Grind Advisor 3.26.0 keeps a
@@ -404,8 +413,15 @@ did not save one.
 
 Inter for UI text, NotoSansMono for every number — doses, yields, times and
 grind settings line up in columns, and a proportional face makes those
-columns ragged. Both families ship in `fonts/` and are already proven on this
-tablet.
+columns ragged.
+
+Where each font comes from (0.63.2): Inter from Lumen's own `fonts/`
+(shipped with its OFL licence), else from `skins/Streamline/`. Noto Sans
+Mono from `skins/Streamline/`, which every de1app build ships, else from
+Lumen's own `fonts/` (kept in this repository for hand installs, not in
+`filelist.txt`). A file is offered to the app's font loader only if it
+exists, and one log line says where each face came from (`Lumen: fonts:
+...`).
 
 The skin does not use the app's `load_font`, because that hands a *positive*
 (point) size to `font create`, scaled by `::settings(default_font_calibration)`
@@ -426,6 +442,12 @@ Copy the `Lumen` folder to `de1plus/skins/` on the tablet, so you end up with:
 de1plus/skins/Lumen/skin.tcl
 de1plus/skins/Lumen/fonts/
 ```
+
+Inside the app (the de1app build), Lumen ships exactly the files listed in
+`filelist.txt`: `skin.tcl`, `sun_zones.txt`, the icons and backgrounds in
+`1280x800/`, `1340x800/` and `2560x1600/`, and `fonts/Inter-*` with
+`Inter-LICENSE.txt`. Lumen is GPL-3.0-or-later (`LICENSE` here; an SPDX
+line in `skin.tcl`).
 
 Then pick it in **Settings → Tablet → (skin list)**.
 
@@ -489,7 +511,8 @@ pure Tcl — the gradient, every panel and pill with a soft shadow, the
 bloom — and writes `lumen_<page>_custom.png` next to the baked images,
 with a `lumen_custom.sig` stamp so unchanged colours draw nothing. If
 painting fails, the pages fall back to flat colour with vector panels.
-Grind Advisor's glass popup stays opaque under Custom.
+Since 0.49.0 it also paints the frosted glass Grind Advisor's popups float
+on, so they keep the glass look under Custom too.
 
 The Lumen settings page carries the **machine column** on the left: Brew
 temperature (±0.5°C), Steam, Flush time (±1 s) and Hot Water, each with the
