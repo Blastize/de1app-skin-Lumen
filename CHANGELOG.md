@@ -4,6 +4,23 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.5 - The cleaning banner says when Maintenance Tracker refuses its tap (pass 23, 2026-10-21) - TABLET-VERIFIED 03:25 (verify.sh PASS run 1)
+
+Base: 0.64.4 (139a7dc). Patch, protocol lane. Reads MT 0.33.2's run_status outcome / reason / at; older MT unchanged.
+- A banner tap notes its second (RAM only). `mt_tap_note` then reads run_status: an outcome refused / gave_up / skipped
+  whose `at` is from that second to 11 min later (MT retries a busy machine for 10 min) is kept with the run's state,
+  and the right line reads "Not switched back: <MT's reason> . Tap to try again" (". Pick your profile" when MT let the
+  run go because the old profile would not load, so the tap is inert). It goes back to the normal line once MT's
+  outcome or the run's state changes; switched / dropped need no text (the banner goes). MT's own Switch back now, an
+  older answer or one later than 11 min are never shown. The reason is MT's first sentence, no aside, cut at 240 px.
+- `_mt_status` is the one run_status read (its own plugin_on gate; a throw logged once), used by `_mt_run_status` and
+  `mt_tap_note`. cancel_profile_run's return value is still never used.
+- Tests: pass_23_offline 18/18 on MT 0.33.2's real tap path (0.64.4 fails P23-REFUSED); the whole headless chain.
+  Tablet (no cleaning profile loaded): home as 0.64.4, log clean. A live refused tap is an owner check (it loads one).
+
+**Safety status:** no write behaviour added or changed. Maintenance Tracker is only read (run_status) plus its public
+cancel_profile_run on the same tap as before; Lumen's new state is two RAM variables.
+
 ## 0.64.4 - Every call into another plugin waits for `plugins loaded`; cleaning-banner guards (pass 22, 2026-10-21) - TABLET-VERIFIED 03:05 (verify.sh PASS run 1)
 
 Base: 0.64.3 (036f6b2). Patch, protocol lane. The parent session's review of 0.64.2-0.64.3, plus the five findings of the

@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.4  (every call into another plugin waits for `plugins
-#                    loaded`; cleaning-banner guards; see `variable version`)
+#  Version: 0.64.5  (the cleaning banner shows Maintenance Tracker's
+#                    refused switch-back after a tap; see `variable version`)
 #
 #
 #
@@ -120,7 +120,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.4"
+    variable version "0.64.5"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -3344,12 +3344,23 @@ proc ::lumen::data::maint_state {} {
 # so the ts + timeout read above named a time already gone ("comes back
 # at 12:29 AM", seen on the tablet 2026-10-21); a stale run now says it
 # did not come back. MT < 0.33.0 keeps the settings(run_restore) path.
+# 0.64.5: a tap MT refuses is no longer silent -- MT 0.33.2's outcome
+# (refused / gave_up / skipped, with its reason) takes the right line until
+# MT's outcome or the run's state changes (mt_tap_note).
 namespace eval ::lumen {
     variable cbanner_on 0
     variable cbanner_fill ""
     # run_status's last error, logged once (the banner reads it on the
     # 200 ms tick).
     variable mt_status_err ""
+    # 0.64.5: the banner tap's answer from MT (RAM only). cbanner_tap_at =
+    # the second the tap asked MT to switch back ("" = no answer awaited);
+    # cbanner_fb = the refusal it got, {outcome at state reason}, kept while
+    # MT's outcome and the run's state stay as they were. MT retries a busy
+    # machine every 5 s for 10 min, so an answer can take that long.
+    variable cbanner_tap_at ""
+    variable cbanner_fb ""
+    variable cbanner_wait_s 660
 }
 proc ::lumen::data::_sep {} { return "  [::lumen::glyph dot]  " }
 
@@ -3410,17 +3421,10 @@ proc ::lumen::data::_future_time { t } {
 # state none | armed | running | stale, prev_title (prev_fn when it had
 # none) and back_at (epoch seconds, armed only). A throw is logged once
 # and reads as no run; anything malformed reads as no run.
+# 0.64.5: the read itself is _mt_status (mt_tap_note reads it too).
 proc ::lumen::data::_mt_run_status {} {
-    variable ::lumen::mt_status_err
-    if { [catch { set d [::plugins::MaintenanceTracker::run_status] } err] } {
-        if { $err ne $mt_status_err } {
-            set mt_status_err $err
-            msg -ERROR "Lumen: could not read Maintenance Tracker's run status: $err"
-        }
-        return ""
-    }
-    set mt_status_err ""
-    if { ![string is list $d] || [llength $d] % 2 != 0 || ![dict exists $d state] } { return "" }
+    set d [_mt_status]
+    if { $d eq "" } { return "" }
     set state [dict get $d state]
     if { $state ni {armed running stale} } { return "" }
     set prev ""
@@ -3433,6 +3437,82 @@ proc ::lumen::data::_mt_run_status {} {
         set back [_future_time [dict get $d back_at]]
     }
     return [dict create state $state prev_title $prev back_at $back]
+}
+
+# MT's run_status as a dict with a state key, or "" (MT not enabled, a
+# throw -- logged once until the error changes -- or a malformed answer).
+# Callers check that the proc exists first.
+proc ::lumen::data::_mt_status {} {
+    variable ::lumen::mt_status_err
+    if { ![::lumen::plugin_on MaintenanceTracker] } { return "" }
+    if { [catch { set d [::plugins::MaintenanceTracker::run_status] } err] } {
+        if { $err ne $mt_status_err } {
+            set mt_status_err $err
+            msg -ERROR "Lumen: could not read Maintenance Tracker's run status: $err"
+        }
+        return ""
+    }
+    set mt_status_err ""
+    if { ![string is list $d] || [llength $d] % 2 != 0 || ![dict exists $d state] } { return "" }
+    return $d
+}
+
+# 0.64.5: MT 0.33.2's answer to the banner's tap, so a refused Switch back
+# now is no longer silent. run_status's outcome / reason / at name MT's
+# last switch-back; it counts here only when it came after Lumen's own tap
+# (at from the tap's second to cbanner_wait_s later) and was a refusal:
+# refused (unsaved profile edits, a profile that would not load), gave_up
+# (the machine stayed busy for 10 min) or skipped. switched and dropped
+# need no words: the profile changes and the banner goes. The refusal is
+# kept with the run's state at that moment, and is let go -- the normal
+# line again, until the next tap -- once MT's outcome or that state
+# changes. Returns {outcome at state reason} or "": nothing to say, MT
+# off, no run_status, or an MT without outcome (0.33.0 / 0.33.1).
+proc ::lumen::data::mt_tap_note {} {
+    variable ::lumen::cbanner_tap_at
+    variable ::lumen::cbanner_fb
+    variable ::lumen::cbanner_wait_s
+    if { $cbanner_tap_at eq "" } { return "" }
+    if { ![::lumen::plugin_on MaintenanceTracker] } { return "" }
+    if { [info procs ::plugins::MaintenanceTracker::run_status] eq "" } { return "" }
+    set d [_mt_status]
+    if { $d eq "" } { return "" }
+    foreach k {outcome reason at} { if { ![dict exists $d $k] } { return "" } }
+    set out [dict get $d outcome]
+    set at [dict get $d at]
+    set st [dict get $d state]
+    if { $cbanner_fb ne "" } {
+        if { $out eq [dict get $cbanner_fb outcome] && $at eq [dict get $cbanner_fb at] \
+          && $st eq [dict get $cbanner_fb state] } { return $cbanner_fb }
+        set cbanner_tap_at ""
+        set cbanner_fb ""
+        return ""
+    }
+    if { ![string is wide -strict $at] || $at < $cbanner_tap_at } {
+        # No answer yet (a busy machine), or an older one: wait, not forever.
+        if { [clock seconds] - $cbanner_tap_at > $cbanner_wait_s } { set cbanner_tap_at "" }
+        return ""
+    }
+    if { $out ni {refused skipped gave_up} || $at - $cbanner_tap_at > $cbanner_wait_s } {
+        set cbanner_tap_at ""
+        return ""
+    }
+    set cbanner_fb [dict create outcome $out at $at state $st reason [dict get $d reason]]
+    return $cbanner_fb
+}
+
+# MT's reason, briefly: its first sentence without the full stop or an
+# aside in brackets ("Profile file missing. Unlink and link it again." ->
+# "Profile file missing", "Could not load the profile (see the log)." ->
+# "Could not load the profile"; _short_reason's rule for the latter).
+proc ::lumen::data::_tap_reason { s } {
+    set s [string trim $s]
+    set i [string first ". " $s]
+    if { $i > 0 } { set s [string range $s 0 [expr {$i - 1}]] }
+    set s [string trimright $s "."]
+    set i [string first " (" $s]
+    if { $i > 12 } { set s [string trim [string range $s 0 [expr {$i - 1}]]] }
+    return $s
 }
 
 # The banner's two lines of text; the left one also paints / blanks the
@@ -3466,12 +3546,30 @@ proc ::lumen::data::clean_banner_right {} {
 # (or "after the run" when MT gives no time), running "comes back after
 # the run", stale "did not come back"; armed and stale end in the tap
 # hint. None is wider than the armed line without a time.
+# 0.64.5: after a tap MT refused (mt_tap_note), "Not switched back: <MT's
+# reason, cut to 240 px> . Tap to try again" -- or ". Pick your profile"
+# when MT let the run go (a profile that would not load), since the tap
+# does nothing then. Neither is wider than the armed line without a time,
+# and MT's known reasons leave the normal title uncut (pass 23).
 proc ::lumen::data::_cbanner_texts {} {
     variable ::lumen::L
     set t [_s ::settings(profile_title)]
     if { $t eq "" } { set t [_s ::settings(profile_filename)] }
     set run [mt_run]
-    if { $run eq "" } {
+    set fb [mt_tap_note]
+    if { $fb ne "" } {
+        set why [_tap_reason [dict get $fb reason]]
+        if { $why eq "" } {
+            set right [translate {Not switched back}]
+        } else {
+            set right "[translate {Not switched back:}] [::lumen::_fit_text $why $L(font_caption) 240 28]"
+        }
+        if { $run ne "" } {
+            append right "[_sep][translate {Tap to try again}]"
+        } else {
+            append right "[_sep][translate {Pick your profile}]"
+        }
+    } elseif { $run eq "" } {
         set right [translate "Pick your espresso profile before brewing"]
     } else {
         set prev [::lumen::_fit_text [dict get $run prev_title] $L(font_caption) 240 28]
@@ -4636,6 +4734,10 @@ proc ::lumen::act::clean_banner_tap {} {
     if { ![::lumen::plugin_on MaintenanceTracker] } { return }
     if { ![::lumen::data::clean_loaded] || [::lumen::data::mt_run] eq "" } { return }
     if { [info procs ::plugins::MaintenanceTracker::cancel_profile_run] eq "" } { return }
+    # 0.64.5: MT's answer comes through run_status (mt_tap_note), never
+    # from cancel_profile_run's return value.
+    set ::lumen::cbanner_tap_at [clock seconds]
+    set ::lumen::cbanner_fb ""
     if { [catch { ::plugins::MaintenanceTracker::cancel_profile_run } err] } {
         msg -ERROR "Lumen: Maintenance Tracker switch-back failed: $err"
     }

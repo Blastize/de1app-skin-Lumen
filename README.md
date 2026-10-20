@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.4 · a skin for the Decent DE1app · by Blastize
+Version 0.64.5 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -13,7 +13,7 @@ Version 0.64.4 · a skin for the Decent DE1app · by Blastize
 
 ![A red banner over the graph card: CLEANING PROFILE LOADED, Cleaning/Forward Flush x5; Gentle and sweet comes back at 18:31, tap to switch back now](docs/cleaning_banner.png)
 
-**Never brew on the cleaning profile.** While a cleaning profile is loaded, a red banner says so. After Maintenance Tracker's Start it also says when your espresso profile comes back, and one tap brings it back now. If it did not come back on its own (the app restarted mid-clean, say), the banner says so, and the same tap brings it back.
+**Never brew on the cleaning profile.** While a cleaning profile is loaded, a red banner says so. After Maintenance Tracker's Start it also says when your espresso profile comes back, and one tap brings it back now. If it did not come back on its own (the app restarted mid-clean, say), the banner says so, and the same tap brings it back. If Maintenance Tracker refuses the tap (unsaved changes to the profile, say), the banner says why.
 
 ![Grind Advisor's after-shot popup on Lumen's glass, in the theme's colours](docs/glass_popup.png)
 
@@ -56,9 +56,19 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.4 — every page built, baked and running on the tablet.**
+**Version 0.64.5 — every page built, baked and running on the tablet.**
 
-New in 0.64.4: **nothing reaches a plugin that is switched off.** The app
+New in 0.64.5: **the cleaning banner says when the switch-back is
+refused.** With Maintenance Tracker 0.33.2 or newer, a tap on the banner
+that Maintenance Tracker turns down — the profile has unsaved changes,
+say, or the machine stayed busy for ten minutes — no longer looks like
+nothing happened: the banner reads "Not switched back: unsaved profile
+edits · Tap to try again" until the run or Maintenance Tracker's answer
+changes. If your profile could not be loaded at all, it says so and asks
+you to pick your profile. Older Maintenance Tracker versions show the
+banner as before.
+
+Earlier, 0.64.4: **nothing reaches a plugin that is switched off.** The app
 loads the code of every installed plugin, even the ones you have not
 turned on, so "installed" is not "running". Lumen now asks the app whether
 each plugin is actually on before it talks to it: Grind Advisor's tile and
