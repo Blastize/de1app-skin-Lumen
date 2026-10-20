@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.2 · a skin for the Decent DE1app · by Blastize
+Version 0.64.3 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,14 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.2 — every page built, baked and running on the tablet.**
+**Version 0.64.3 — every page built, baked and running on the tablet.**
 
-New in 0.64.2: **quiet with the plugins you don't use.** Lumen now looks
+New in 0.64.3: documentation only. The safety notes now say exactly who
+writes what: Lumen writes only its custom-theme cache; the app's own image
+code still saves rescaled copies of Lumen's shipped art into the skin's
+screen-size folder, as it does for every skin.
+
+Earlier, 0.64.2: **quiet with the plugins you don't use.** Lumen now looks
 up sunrise and sunset only if you use the Auto theme, and asks the
 tablet for its location only on a real Android tablet. It prepares DYE's
 theme only when DYE is installed. It reads your bean bags from SDB, and
@@ -92,7 +97,9 @@ The copies older versions left in the skin folder are simply not used
 any more. Shot history is read through the app's data folder too. And if
 an app update clears the skin's screen-size folder, Grind Advisor's glass
 popup now rebuilds its glass on the first open instead of turning opaque;
-on a 1280x800 tablet the popup now gets glass on Dark and Light as well.
+on a 1280x800 tablet the popup now gets glass on Dark and Light as well
+(both worked out from the app's code and checked offline, not yet seen
+on a tablet).
 
 Earlier, 0.63.2: **ready to ship with the app.** Lumen now has a
 `filelist.txt`, the list the de1app build uses to pick which skin files go
@@ -698,8 +705,13 @@ clamps its value. Three groups:
   (`_customl` for an Auto set's light half) into
   `skin_settings/Lumen/cache/<width>x<height>/` under the app's data
   folder (`[data_directory]`; `[homedir]` on apps that predate it, the
-  same folder on Android) — nothing else, never inside the skin folder
-  (0.64.0). Deleting that cache only makes Lumen paint it again.
+  same folder on Android) — nothing else; Lumen itself never writes inside
+  the skin folder (0.64.0). Deleting that cache only makes Lumen paint it
+  again. The app's own image code does write there, as for every skin:
+  shipped art missing at your screen size (page backgrounds, the Dark /
+  Light glass) is rescaled from `2560x1600/` and saved in
+  `skins/Lumen/<width>x<height>/` (on newer apps: the same path under the
+  data folder, which is that very folder while the two are one).
   Since 0.36.0 the chart is always smooth with stage lines shown —
   `live_graph_smoothing_technique` and `lumen_chart_stages` are no
   longer read or written.

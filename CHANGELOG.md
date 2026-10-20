@@ -4,6 +4,19 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.3 - Safety notes say who writes what (2026-10-21) - TABLET-VERIFIED 02:28 (verify.sh PASS run 1)
+
+Base: 0.64.2 (7243175). Patch, docs only (comments in skin.tcl, README, CHANGELOG; no code changed), from the parent
+session's review of 0.64.0.
+- "Nothing is written inside the skin folder" was too broad. Lumen's own writes are only its custom-theme cache under
+  <data root>/skin_settings/Lumen/cache/<WxH>. dui's own resolver still saves rescaled copies of shipped art (page
+  backgrounds, dark / light glass) missing at the screen size into [image_cache_dir_for skins/Lumen]/<WxH>: that is
+  skins/Lumen/<WxH> on the tablet's 1.46.1 core and on main while data and code share a root. With 0.64.2's filelist
+  (no 1340x800) that happens on first use on 1340x800 tablets.
+- The 0.64.0 self-heal and 1280x800 glass claims are marked offline-proven (README, 0.64.0 entry, glass_material comment).
+
+**Safety status:** no write behaviour added or changed; the wording now matches the 0.64.0 / 0.64.2 behaviour.
+
 ## 0.64.2 - Startup guards; the build stops shipping 1340x800 (pass 21, 2026-10-21) - TABLET-VERIFIED 02:21 (verify.sh PASS run 1)
 
 Base: 0.64.1 (7d4bb38). Patch, protocol lane (hooks, startup side effects, packaging). John's #369 point 4 plus the
@@ -68,7 +81,8 @@ Also: history (`last_shot_candidates`, the bag arrows' `_bag_source`) is read fr
 (data_directory when present, else homedir). fonts/ and sun_zones.txt come from the skin folder taken once at load
 (`::lumen::skin_dir`), not `[homedir]/skins/Lumen` or a live `[skin_directory]`. Dark / light glass now come through
 `dui::image::find <name> 1` (owner choice): a 1340x800 folder wiped by the core updater heals on the first popup (dui rescales
-from 2560x1600; a failure is logged, popup opaque, nothing thrown), and 1280x800 tablets get dark / light glass too.
+from 2560x1600; a failure is logged, popup opaque, nothing thrown), and 1280x800 tablets get dark / light glass too
+(both offline-proven only; corrected in 0.64.3).
 Tests: pass_19_offline 24/24 in three cores (OLD homedir only; UP data_directory + skin_settings_directory with a data root
 split from the code root; MID), every open / mkdir / delete / image write traced into the cache, decoy legacy files never read;
 the 0.63.2 copy fails 19. The tablet's core has no data_directory: it runs the homedir branch; the upstream branches are proven
@@ -78,7 +92,8 @@ sig, no marker left); the next restart painted nothing; skins/Lumen/1340x800 was
 pixel-identical to 0.63.2 except the version caption and the clock.
 
 **Safety status:** one write capability, MOVED (not added): the custom theme's PNG / sig / marker, now under the data root's
-skin_settings/Lumen/cache/<WxH>/ and never in the skin folder. No delete beyond its own marker; legacy files untouched.
+skin_settings/Lumen/cache/<WxH>/; Lumen itself never writes in the skin folder (dui's own rescale of shipped art still
+does, see 0.64.3). No delete beyond its own marker; legacy files untouched.
 history/ and history_v2/ are still only read; no database is opened.
 
 ## 0.63.2 - filelist.txt for the de1app build; Noto Sans Mono from Streamline (pass 18, 2026-10-21) - TABLET-VERIFIED 00:16 (verify.sh PASS run 1)

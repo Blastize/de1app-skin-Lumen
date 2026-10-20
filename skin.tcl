@@ -6,19 +6,25 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.2  (startup guards: sun lookup only for Auto and only on
-#                    Android, DYE / SDB only when installed and enabled;
-#                    see `variable version`)
+#  Version: 0.64.3  (the safety notes say who writes what: Lumen's cache vs
+#                    dui's own rescale; see `variable version`)
 #
 #
 #
 #  SAFETY STATUS: no database is opened. Nothing in history/ or history_v2/
 #  is written, renamed or deleted -- ever, in any version.
 #
-#  FILE WRITES (0.64.0): only the custom theme's generated backgrounds, their
-#  .sig stamp and the transient .baking marker, under
-#  [skin_settings_directory Lumen]/cache/<W>x<H>/ (= <data root>/skin_settings/
-#  Lumen/cache/..., see ::lumen::_skin_data_dir). Never inside the skin folder.
+#  FILE WRITES (0.64.0): Lumen's own writes are only the custom theme's
+#  generated backgrounds, their .sig stamp and the transient .baking marker,
+#  under [skin_settings_directory Lumen]/cache/<W>x<H>/ (= <data root>/
+#  skin_settings/Lumen/cache/..., see ::lumen::_skin_data_dir); Lumen never
+#  writes inside the skin folder.
+#  Separately, dui writes there for every skin: shipped art asked for by
+#  bare name (page backgrounds, the dark / light glass) that is missing at
+#  this screen size is rescaled from 2560x1600 by dui::image::find and saved
+#  to [image_cache_dir_for skins/Lumen]/<W>x<H> -- skins/Lumen/<W>x<H> on
+#  the tablet's 1.46.1 core (no image_cache_dir_for) and on de1app main
+#  while the data and code roots are one folder (every platform today).
 #
 #  READ access is limited to history/*.shot files, read one at a time and
 #  only when a shot is being SELECTED for the home page (startup, a bag
@@ -114,7 +120,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.2"
+    variable version "0.64.3"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -4139,8 +4145,11 @@ proc ::lumen::refresh_after_history_change {} {
 #     WITH rescale -- the screen's folder, else made from the 2560x1600 art
 #     and saved there -- so a skins/Lumen/<WxH>/ folder the core updater
 #     wiped heals on the first popup (a second or so, once), and a 1280x800
-#     tablet now gets dark / light glass too. Custom files come from the
-#     data-root cache by full path (custom::art_dir); they are never rescaled.
+#     tablet now gets dark / light glass too (both proven offline against
+#     the core's find logic; not yet seen on a tablet). The rescaled copies
+#     are dui's writes into skins/Lumen/<WxH>, not Lumen's (see the header).
+#     Custom files come from the data-root cache by full path
+#     (custom::art_dir); they are never rescaled.
 # Dict: ok 1  page off  theme dark|light  radius 26  glass <path> dim <path>
 #
 # A consumer guards with [info procs ::lumen::glass_material] -- on any
