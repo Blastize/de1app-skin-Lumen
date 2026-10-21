@@ -6,8 +6,9 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.8  (Lumen's own reads on the 200 ms tick test their state
-#                    instead of catching; see `variable version`)
+#  Version: 0.64.9  (only finite numbers on the tick; the cleaning banner
+#                    forgets a tap's answer on any profile load; see
+#                    `variable version`)
 #
 #
 #
@@ -120,7 +121,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.8"
+    variable version "0.64.9"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -1396,9 +1397,14 @@ proc ::lumen::data::_s { name {default ""} } {
 }
 
 # 0.64.8: a number expr and format accept. `string is double` also takes
-# NaN, which both refuse, and no number contains "nan"; Inf passes, as before.
+# NaN, which both refuse, and no number contains "nan". 0.64.9: and only a
+# FINITE one: "Inf", "-Infinity" and an overflow such as "1e400" (read as
+# inf) pass `string is double` too, and inf - inf or inf / inf raise in
+# expr (last_ratio, next_ratio and grind_delta did, on the tick).
 proc ::lumen::data::_is_num { v } {
-    return [expr {[string is double -strict $v] && ![string match -nocase *nan* $v]}]
+    if { ![string is double -strict $v] || [string match -nocase *nan* $v] } { return 0 }
+    set d [expr {double($v)}]
+    return [expr {$d >= -1.7976931348623157e308 && $d <= 1.7976931348623157e308}]
 }
 
 proc ::lumen::data::_is_pos { v } {
@@ -1702,6 +1708,7 @@ proc ::lumen::data::grind_delta {} {
     set to   [_g $rec next]
     if { ![_is_num $from] || ![_is_num $to] } { return "" }
     set d [expr {double($to) - double($from)}]
+    if { ![_is_num $d] } { return "" }
     if { abs($d) < 0.05 } { return [translate "keep this grind"] }
     if { $d < 0 } { return "[translate {finer by}] [_grind_num [expr {abs($d)}]]" }
     return "[translate {coarser by}] [_grind_num [expr {abs($d)}]]"
@@ -1944,6 +1951,8 @@ proc ::lumen::data::last_ratio {} {
     set y [_yield_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
     set r [expr {double($y) / double($d)}]
+    # 0.64.9: a tiny dose can still overflow the quotient to inf.
+    if { ![_is_num $r] } { return "--" }
     # One decimal, matching the NEXT SHOT card (0.43.1; was two).
     return [format "1:%.1f" $r]
 }
@@ -2144,6 +2153,7 @@ proc ::lumen::data::next_ratio {} {
     set y [_target_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
     set r [expr {double($y) / double($d)}]
+    if { ![_is_num $r] } { return "--" }
     return [format "1:%.1f" $r]
 }
 
@@ -3621,6 +3631,30 @@ proc ::lumen::data::_cbanner_forget {} {
         set cbanner_fb ""
     }
 }
+
+# 0.64.9: and after every profile actually loaded, wherever it happens. The
+# home tick above sees the banner off only while the home page shows, so
+# cleaning A -> another profile -> cleaning A, all away from home, kept A's
+# old refusal. The core's select_profile (vars.tcl:2932) raises no event;
+# a leave trace on it (the pattern of the SDB save hook) drops the tap's
+# answer after each successful load. MT's own switch-back counts: MT
+# records a refusal only when its select_profile call raised, returned -1
+# or never ran, so a failed load keeps the answer. The callback cannot
+# raise (a trace error would surface in the caller's profile load).
+proc ::lumen::_profile_loaded { cmd code result op } {
+    if { $code != 0 || $result eq "-1" } { return }
+    ::lumen::data::_cbanner_forget
+}
+proc ::lumen::hook_profile_load {} {
+    if { ![llength [info commands ::select_profile]] } {
+        msg -INFO "Lumen: the app's select_profile not found; the cleaning banner forgets a tap's answer on the home page only"
+        return
+    }
+    if { [lsearch -exact [trace info execution ::select_profile] {leave ::lumen::_profile_loaded}] >= 0 } { return }
+    trace add execution ::select_profile leave ::lumen::_profile_loaded
+    msg -INFO "Lumen: the cleaning banner follows profile loads"
+}
+::lumen::hook_profile_load
 
 proc ::lumen::data::clean_banner_right {} {
     if { ![clean_loaded] } { return "" }

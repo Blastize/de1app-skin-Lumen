@@ -4,45 +4,50 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.9 - Only finite numbers on the tick; the cleaning banner forgets a tap's answer on any profile load (pass 27, 2026-10-21) - TABLET-VERIFIED 15:48 (verify.sh PASS run 1)
+
+Base: 0.64.8 (4a678a7). Patch, protocol lane. Lows from the parent session's review of 0.64.7-0.64.8.
+- `data::_is_num` takes only finite numbers: "Inf", "-Infinity" and overflows like "1e400" passed `string is double`,
+  and inf - inf / inf / inf raised in last_ratio, next_ratio and grind_delta (a tick error). Those three also read a
+  non-finite result (a finite overflow: Tcl does not raise on it) as no value.
+- Banner: a leave trace on the core's select_profile (installed once at skin load, like the SDB save hook) drops the
+  tap's answer after each successful load (not a raise or -1), so cleaning A -> another -> A away from home no longer
+  brings A's refusal back. A rename + wrapper (Graphical_Flow_Calibrator) keeps it; a bare redefinition would not.
+- Docs: README 0.64.8 paragraph; the 0.64.7 / 0.64.8 entries trimmed to the cap; pass_26.md's control line.
+- Tests: pass_27_offline 13/13 (the 0.64.8 copy fails AWAY-SAME and raises on infinities); pass_26 counts infinities
+  as no number; the whole chain. Tablet: hook installed (GFC loads after it), home as 0.64.8.
+
+**Safety status:** no write behaviour added or changed. The trace only clears two Lumen RAM variables; it never
+changes, blocks or re-orders a profile load.
+
 ## 0.64.8 - Lumen's own reads on the 200 ms tick test their state instead of catching (pass 26, 2026-10-21) - TABLET-VERIFIED 14:45 (verify.sh PASS run 1)
 
 Base: 0.64.7 (b236fff). Patch, protocol lane (tick path). The bare catches 0.64.6 left on Lumen's own core reads.
-- A swallowed catch still sets ::errorInfo, which the core's BLE runner prints as "BLE error info ...". Routine on the
-  tick: ::de1(last_ping) before the DE1 first answers (home water readout, 2x per tick with the machine off); ::timers
-  after clear_espresso_timers (steam / water / flush timers after any shot); flow_opened before a flow page's first
-  show; ::settings(beverage_type) (cleaning banner). Now `info exists` / `_s`.
-- Core commands (espresso_elapsed and the chart vectors, return_temperature_measurement,
-  water_tank_level_to_milliliters, ::device::scale::is_connected): `info commands` first.
-- New `data::_is_num` (string is double, not NaN) before every number the helpers format or compare; a NaN chart
-  sample reads as no sample (the legend raised). Catches that could not fail (steam_mode, water_mode, bag_count,
-  water_low_ml, scale_connecting) unwrapped. Off the tick, same shape: glass_material, load_last_shot_curves.
-- Kept: catches that log, file / shot-file parsing, `_measure`'s font measure, tap-path reads (machine_busy,
-  set_dose_from_scale).
+- A swallowed catch still sets ::errorInfo, which the core's BLE runner prints as "BLE error info ...". Routine misses
+  on the tick (::de1(last_ping) before the DE1 answers, ::timers after clear_espresso_timers, flow_opened, the banner's
+  beverage_type) are `info exists` / `_s` tests; core commands (espresso_elapsed, the chart vectors,
+  return_temperature_measurement, water_tank_level_to_milliliters, scale is_connected) `info commands` first.
+- `data::_is_num` (string is double, not NaN; 0.64.9: finite too) before every number formatted or compared; a NaN
+  chart sample reads as no sample. Catches that could not fail unwrapped; catches that log, file parsing, `_measure`
+  and tap-path reads kept.
 - Tests: pass_26_offline 17/17 (every ::lumen::data accessor in six states: errorInfo empty, nothing raised, text as
-  0.64.7; the 0.64.7 copy fails 9, errorInfo dirty in 162 calls); pass_15 extracts `_is_num`; check_skin's hostile
-  case has no shot vector (a BLT vector never throws on length); the whole chain.
-  Tablet: home as 0.64.7 (water, last shot time, legend values, ratio, scale state); no Lumen "BLE error info".
+  0.64.7, whose copy fails 9); the whole chain. Tablet: home as 0.64.7; no Lumen "BLE error info".
 
 **Safety status:** no write behaviour added or changed; only reads, now tested before they are made.
 
 ## 0.64.7 - The cleaning banner forgets an old switch-back refusal (pass 25, 2026-10-21) - TABLET-VERIFIED 14:08 (verify.sh PASS run 1)
 
-Base: 0.64.6 (1e74d6d). Patch, protocol lane. Two display bugs from the parent session's review of 0.64.5-0.64.6,
-both reproduced with Maintenance Tracker 0.33.2's real tap path.
-- The tap's answer (cbanner_tap_at, cbanner_fb: RAM only) was cleared only by a new tap, a changed outcome / state or
-  the 11 min wait, never while the banner was off (both text procs return before mt_tap_note then). So a "Profile file
-  missing" refusal came back on a cleaning profile loaded by hand later, and after a successful tap a later run's
-  refusal (MT's own Switch back now) read as its answer for ~11 min.
-- `_cbanner_forget`: both dropped whenever the banner is off (two variable reads per tick, no write unless set). A
-  remembered refusal also carries the loaded profile (`fn`) and is let go on any other profile (one changed while away
-  from home).
-- Nits: the dye_live comment says loaded, not enabled; PROJECT_STATE back under 80 lines.
-- Tests: pass_25_offline 11/11 (the 0.64.6 copy shows all three stale lines); pass_23 / pass_25 now pin MT to the
-  archived v0.33.2 (the live folder was mid-edit by another session); the whole headless chain. Tablet (no
-  cleaning profile loaded, MT 0.33.3 there by then): home and log as 0.64.6.
+Base: 0.64.6 (1e74d6d). Patch, protocol lane. Two display bugs from the parent session's review of 0.64.5-0.64.6.
+- The tap's answer (cbanner_tap_at, cbanner_fb: RAM) was cleared only by a new tap, a changed outcome / state or the
+  11 min wait, never while the banner was off: a "Profile file missing" refusal came back on a cleaning profile loaded
+  later, and after a successful tap a later run's refusal read as its answer.
+- `_cbanner_forget` drops both whenever the banner is off (no write unless set); a remembered refusal carries the
+  loaded profile (`fn`). 0.64.9 also drops them on any successful profile load. Nits: dye_live comment, PROJECT_STATE.
+- Tests: pass_25_offline 11/11 (the 0.64.6 copy shows all three stale lines); pass_23 / 25 pin MT to the archived
+  v0.33.2. Tablet (no cleaning profile loaded): home and log as 0.64.6.
 
-**Safety status:** no write behaviour added or changed; Lumen's change is two RAM variables cleared earlier. MT is still
-only read (run_status) plus its public cancel_profile_run on a banner tap, as in 0.64.5.
+**Safety status:** no write behaviour added or changed; two RAM variables cleared earlier. MT: run_status read plus its
+public cancel_profile_run on a banner tap, as in 0.64.5.
 
 ## 0.64.6 - No sunrise lookup on a picker visit without Auto in use; DYE must really have run; plugin errors on the tick logged once (pass 24, 2026-10-21) - TABLET-VERIFIED 03:44 (verify.sh PASS run 1)
 
