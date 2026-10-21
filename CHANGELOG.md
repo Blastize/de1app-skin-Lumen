@@ -4,6 +4,25 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.7 - The cleaning banner forgets an old switch-back refusal (pass 25, 2026-10-21) - TABLET-VERIFIED 14:08 (verify.sh PASS run 1)
+
+Base: 0.64.6 (1e74d6d). Patch, protocol lane. Two display bugs from the parent session's review of 0.64.5-0.64.6,
+both reproduced with Maintenance Tracker 0.33.2's real tap path.
+- The tap's answer (cbanner_tap_at, cbanner_fb: RAM only) was cleared only by a new tap, a changed outcome / state or
+  the 11 min wait, never while the banner was off (both text procs return before mt_tap_note then). So a "Profile file
+  missing" refusal came back on a cleaning profile loaded by hand later, and after a successful tap a later run's
+  refusal (MT's own Switch back now) read as its answer for ~11 min.
+- `_cbanner_forget`: both dropped whenever the banner is off (two variable reads per tick, no write unless set). A
+  remembered refusal also carries the loaded profile (`fn`) and is let go on any other profile (one changed while away
+  from home).
+- Nits: the dye_live comment says loaded, not enabled; PROJECT_STATE back under 80 lines.
+- Tests: pass_25_offline 11/11 (the 0.64.6 copy shows all three stale lines); pass_23 / pass_25 now pin MT to the
+  archived v0.33.2 (the live folder was mid-edit by another session); the whole headless chain. Tablet (no
+  cleaning profile loaded, MT 0.33.3 there by then): home and log as 0.64.6.
+
+**Safety status:** no write behaviour added or changed; Lumen's change is two RAM variables cleared earlier. MT is still
+only read (run_status) plus its public cancel_profile_run on a banner tap, as in 0.64.5.
+
 ## 0.64.6 - No sunrise lookup on a picker visit without Auto in use; DYE must really have run; plugin errors on the tick logged once (pass 24, 2026-10-21) - TABLET-VERIFIED 03:44 (verify.sh PASS run 1)
 
 Base: 0.64.5 (52c0307). Patch, protocol lane. The parent session's review of 0.64.4.

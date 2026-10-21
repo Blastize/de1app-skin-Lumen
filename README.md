@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.6 · a skin for the Decent DE1app · by Blastize
+Version 0.64.7 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,16 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.6 — every page built, baked and running on the tablet.**
+**Version 0.64.7 — every page built, baked and running on the tablet.**
 
-New in 0.64.6: **quieter with the plugins and the Auto theme.** If you
+New in 0.64.7: **the cleaning banner forgets an old answer.** When
+Maintenance Tracker turned down a tap on the banner, its "Not switched
+back" line could come back on a cleaning profile you loaded much later,
+or show a later run's refusal as the answer to the old tap. Lumen now
+drops that answer as soon as the banner goes away, and never shows it on
+a different cleaning profile.
+
+Earlier, 0.64.6: **quieter with the plugins and the Auto theme.** If you
 use Dark or Light and your saved custom colours are an Auto set, opening
 the theme picker no longer looks up sunrise and sunset; that happens only
 when you tap Auto, or press Done on an Auto set. DYE's next-shot values

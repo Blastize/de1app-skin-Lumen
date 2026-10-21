@@ -6,9 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.6  (no sunrise lookup on a picker visit without Auto in
-#                    use; DYE must really have run; plugin errors on the tick
-#                    logged once; see `variable version`)
+#  Version: 0.64.7  (the cleaning banner forgets an old switch-back refusal
+#                    once it goes away; see `variable version`)
 #
 #
 #
@@ -121,7 +120,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.6"
+    variable version "0.64.7"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -1958,7 +1957,8 @@ proc ::lumen::data::last_ratio_note {} {
 # sources DYE (Android / undroid only) but still loads its settings, and an
 # enabled DYE then counts as loaded. dye_live needs both.
 
-# DYE is enabled AND its code ran (DYE's public open proc exists).
+# DYE counts as loaded (plugin_on: it was enabled when the app started)
+# AND its code ran (DYE's public open proc exists).
 proc ::lumen::data::dye_live {} {
     if { ![::lumen::plugin_on DYE] } { return 0 }
     return [expr {[info procs ::plugins::DYE::open] ne ""}]
@@ -3414,9 +3414,11 @@ namespace eval ::lumen {
     variable mt_status_err ""
     # 0.64.5: the banner tap's answer from MT (RAM only). cbanner_tap_at =
     # the second the tap asked MT to switch back ("" = no answer awaited);
-    # cbanner_fb = the refusal it got, {outcome at state reason}, kept while
-    # MT's outcome and the run's state stay as they were. MT retries a busy
-    # machine every 5 s for 10 min, so an answer can take that long.
+    # cbanner_fb = the refusal it got, {outcome at state reason fn}, kept
+    # while MT's outcome, the run's state and the loaded profile (fn, 0.64.7)
+    # stay as they were. MT retries a busy machine every 5 s for 10 min, so
+    # an answer can take that long. 0.64.7: both are dropped whenever the
+    # banner is off (_cbanner_forget).
     variable cbanner_tap_at ""
     variable cbanner_fb ""
     variable cbanner_wait_s 660
@@ -3525,8 +3527,9 @@ proc ::lumen::data::_mt_status {} {
 # need no words: the profile changes and the banner goes. The refusal is
 # kept with the run's state at that moment, and is let go -- the normal
 # line again, until the next tap -- once MT's outcome or that state
-# changes. Returns {outcome at state reason} or "": nothing to say, MT
-# off, no run_status, or an MT without outcome (0.33.0 / 0.33.1).
+# changes (0.64.7: or another profile is loaded). Returns {outcome at state
+# reason fn} or "": nothing to say, MT off, no run_status, or an MT without
+# outcome (0.33.0 / 0.33.1).
 proc ::lumen::data::mt_tap_note {} {
     variable ::lumen::cbanner_tap_at
     variable ::lumen::cbanner_fb
@@ -3540,9 +3543,11 @@ proc ::lumen::data::mt_tap_note {} {
     set out [dict get $d outcome]
     set at [dict get $d at]
     set st [dict get $d state]
+    set fn [string trim [_s ::settings(profile_filename)]]
     if { $cbanner_fb ne "" } {
+        # 0.64.7: and only on the cleaning profile it was given for.
         if { $out eq [dict get $cbanner_fb outcome] && $at eq [dict get $cbanner_fb at] \
-          && $st eq [dict get $cbanner_fb state] } { return $cbanner_fb }
+          && $st eq [dict get $cbanner_fb state] && $fn eq [dict get $cbanner_fb fn] } { return $cbanner_fb }
         set cbanner_tap_at ""
         set cbanner_fb ""
         return ""
@@ -3556,7 +3561,7 @@ proc ::lumen::data::mt_tap_note {} {
         set cbanner_tap_at ""
         return ""
     }
-    set cbanner_fb [dict create outcome $out at $at state $st reason [dict get $d reason]]
+    set cbanner_fb [dict create outcome $out at $at state $st reason [dict get $d reason] fn $fn]
     return $cbanner_fb
 }
 
@@ -3581,8 +3586,26 @@ proc ::lumen::data::_tap_reason { s } {
 proc ::lumen::data::clean_banner_left {} {
     set on [clean_loaded]
     ::lumen::_cbanner_sync $on
-    if { !$on } { return "" }
+    if { !$on } {
+        _cbanner_forget
+        return ""
+    }
     return [lindex [_cbanner_texts] 0]
+}
+
+# 0.64.7: the tap's answer belongs to the cleaning run it was given in. Once
+# the banner is off (no cleaning profile loaded: switched back, or another
+# profile picked) a pending tap and a remembered refusal are dropped, so a
+# cleaning profile loaded later starts from the plain line, and a later
+# run's refusal (MT's own Switch back now, say) is never shown as the
+# answer to an old tap. Cheap on the tick: two variable reads while off.
+proc ::lumen::data::_cbanner_forget {} {
+    variable ::lumen::cbanner_tap_at
+    variable ::lumen::cbanner_fb
+    if { $cbanner_tap_at ne "" || $cbanner_fb ne "" } {
+        set cbanner_tap_at ""
+        set cbanner_fb ""
+    }
 }
 
 proc ::lumen::data::clean_banner_right {} {
