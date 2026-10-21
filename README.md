@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.7 · a skin for the Decent DE1app · by Blastize
+Version 0.64.8 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,18 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.7 — every page built, baked and running on the tablet.**
+**Version 0.64.8 — every page built, baked and running on the tablet.**
 
-New in 0.64.7: **the cleaning banner forgets an old answer.** When
+New in 0.64.8: **no stale errors left behind for the app's log.** The
+home screen reads the machine's state five times a second, and some of
+it is routinely missing — the water level's last contact before the
+machine has ever connected, the steam, water and flush timers after a
+shot. Lumen used to try each read and quietly swallow the failure, which
+left an old error message lying around that the app could later print
+as a confusing "BLE error info" line. It now checks first and never
+leaves one. Nothing on screen changes.
+
+Earlier, 0.64.7: **the cleaning banner forgets an old answer.** When
 Maintenance Tracker turned down a tap on the banner, its "Not switched
 back" line could come back on a cleaning profile you loaded much later,
 or show a later run's refusal as the answer to the old tap. Lumen now

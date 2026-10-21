@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.7  (the cleaning banner forgets an old switch-back refusal
-#                    once it goes away; see `variable version`)
+#  Version: 0.64.8  (Lumen's own reads on the 200 ms tick test their state
+#                    instead of catching; see `variable version`)
 #
 #
 #
@@ -120,7 +120,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.7"
+    variable version "0.64.8"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -1372,6 +1372,12 @@ proc ::lumen::draw_de1_icon { page cx cy size color } {
 #  only, and only touches the canvas when the value actually changed. So
 #  these must stay cheap and must never touch the filesystem.
 #
+#  0.64.8: and they never catch a failure they expect. A swallowed catch still
+#  sets ::errorInfo, and the core's BLE runner prints a stale one as "BLE error
+#  info ..." (de1_comms.tcl ~120) -- five a second here. The state is tested
+#  first instead (info exists / info commands / _is_num); a failure that is
+#  not expected reaches dui, which logs it once per item.
+#
 #  In particular: GrindAdvisor's own load_last_recommendation reads a file.
 #  We never call it. Its plugin.tcl already calls it once at load, and
 #  save_last_recommendation keeps the in-memory dict current, so reading the
@@ -1389,10 +1395,15 @@ proc ::lumen::data::_s { name {default ""} } {
     return $default
 }
 
+# 0.64.8: a number expr and format accept. `string is double` also takes
+# NaN, which both refuse, and no number contains "nan"; Inf passes, as before.
+proc ::lumen::data::_is_num { v } {
+    return [expr {[string is double -strict $v] && ![string match -nocase *nan* $v]}]
+}
+
 proc ::lumen::data::_is_pos { v } {
-    if { $v eq "" } { return 0 }
-    if { [catch { set ok [expr {double($v) > 0}] }] } { return 0 }
-    return $ok
+    if { ![_is_num $v] } { return 0 }
+    return [expr {double($v) > 0}]
 }
 
 # 0.62.1 (F23, one copy style across the toolkit): the characters the
@@ -1433,9 +1444,8 @@ proc ::lumen::data::_short_reason { s } {
 }
 
 proc ::lumen::data::_num { v {dp 1} {default "--"} } {
-    if { $v eq "" } { return $default }
-    if { [catch { set out [format "%.${dp}f" $v] }] } { return $default }
-    return $out
+    if { ![_is_num $v] } { return $default }
+    return [format "%.${dp}f" $v]
 }
 
 # ---------------------------------------------------------------- grind ---
@@ -1655,8 +1665,8 @@ proc ::lumen::data::grind_header {} {
 # the rounding step needs them (a 0.25 step: 3.25 read "3.2" here while the
 # popup said 3.25).
 proc ::lumen::data::_grind_num { v } {
-    if { $v eq "" } { return "--" }
-    if { [catch { set two [format %.2f $v] }] } { return "--" }
+    if { ![_is_num $v] } { return "--" }
+    set two [format %.2f $v]
     if { [string index $two end] eq "0" } { return [format %.1f $v] }
     return $two
 }
@@ -1690,8 +1700,8 @@ proc ::lumen::data::grind_delta {} {
     if { $move ne "" } { return $move }
     set from [_g $rec grind]
     set to   [_g $rec next]
-    if { $from eq "" || $to eq "" } { return "" }
-    if { [catch { set d [expr {double($to) - double($from)}] }] } { return "" }
+    if { ![_is_num $from] || ![_is_num $to] } { return "" }
+    set d [expr {double($to) - double($from)}]
     if { abs($d) < 0.05 } { return [translate "keep this grind"] }
     if { $d < 0 } { return "[translate {finer by}] [_grind_num [expr {abs($d)}]]" }
     return "[translate {coarser by}] [_grind_num [expr {abs($d)}]]"
@@ -1919,9 +1929,9 @@ proc ::lumen::data::last_yield {} {
 }
 
 proc ::lumen::data::last_time {} {
-    if { [catch { set n [espresso_elapsed length] }] } { return "--" }
-    if { $n <= 0 } { return "--" }
-    if { [catch { set t [espresso_elapsed range end end] }] } { return "--" }
+    if { ![llength [info commands espresso_elapsed]] } { return "--" }
+    if { [espresso_elapsed length] <= 0 } { return "--" }
+    set t [espresso_elapsed range end end]
     # A cleared series reads 0.0 at idle; that is "no shot", not a 0.0s shot.
     if { ![_is_pos $t] } { return "--" }
     return [_num $t 1]
@@ -1933,7 +1943,7 @@ proc ::lumen::data::last_ratio {} {
     set d [_dose_raw]
     set y [_yield_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
-    if { [catch { set r [expr {double($y) / double($d)}] }] } { return "--" }
+    set r [expr {double($y) / double($d)}]
     # One decimal, matching the NEXT SHOT card (0.43.1; was two).
     return [format "1:%.1f" $r]
 }
@@ -2133,7 +2143,7 @@ proc ::lumen::data::next_ratio {} {
     set d [_s ::settings(grinder_dose_weight)]
     set y [_target_raw]
     if { ![_is_pos $d] || ![_is_pos $y] } { return "--" }
-    if { [catch { set r [expr {double($y) / double($d)}] }] } { return "--" }
+    set r [expr {double($y) / double($d)}]
     return [format "1:%.1f" $r]
 }
 
@@ -2178,9 +2188,10 @@ proc ::lumen::data::last_profile {} {
 # (a cleared vector reads length 1 with a leading 0, so <= 1 is empty).
 # In-memory BLT reads only; no file, no plugin.
 proc ::lumen::data::_vec_last { vec } {
-    if { [catch { set n [$vec length] }] || $n <= 1 } { return "" }
-    if { [catch { set v [$vec range end end] }] } { return "" }
-    if { ![string is double -strict $v] } { return "" }
+    if { ![llength [info commands $vec]] } { return "" }
+    if { [$vec length] <= 1 } { return "" }
+    set v [$vec range end end]
+    if { ![_is_num $v] } { return "" }
     return $v
 }
 
@@ -2235,8 +2246,8 @@ proc ::lumen::data::target_yield_note {} {
 # Blank once the chart has data. An empty BLT graph autoscales x to
 # -0.1..0.1, which reads as a broken chart rather than an empty one.
 proc ::lumen::data::chart_empty_note {} {
-    if { [catch { set n [espresso_elapsed length] }] } { return "" }
-    if { $n > 1 } { return "" }
+    if { ![llength [info commands espresso_elapsed]] } { return "" }
+    if { [espresso_elapsed length] > 1 } { return "" }
     # 0.62.1 (F23): fact . next step, a middle dot (was a spaced hyphen).
     return "[translate {No shot data yet}] [::lumen::glyph dot] [translate {pull a shot}]"
 }
@@ -2278,28 +2289,31 @@ proc ::lumen::data::_sane_secs { v } {
 #
 # Integer division throughout, matching the core's own timer procs, so the
 # display truncates rather than rounding up at the half second.
+#
+# 0.64.8: a missing timer is routine -- clear_espresso_timers unsets the whole
+# ::timers array at load and at every shot start (vars.tcl:350-374), so the
+# steam, water and flush keys are gone until that flow next runs -- and so is
+# a page never shown yet. Both are tested, not caught.
 proc ::lumen::data::_flow_secs { page start_key stop_key } {
     set st 0 ; set sp 0
-    catch { set st $::timers($start_key) }
-    catch { set sp $::timers($stop_key) }
+    if { [info exists ::timers($start_key)] } { set st $::timers($start_key) }
+    if { [info exists ::timers($stop_key)] } { set sp $::timers($stop_key) }
 
-    if { ![string is double -strict $st] || $st <= 0 } { return 0 }
-    if { ![string is double -strict $sp] } { set sp 0 }
+    if { ![_is_num $st] || $st <= 0 } { return 0 }
+    if { ![_is_num $sp] } { set sp 0 }
 
     if { $sp <= 0 || $sp < $st } {
         return [expr {([clock milliseconds] - $st) / 1000}]
     }
 
     set opened 0
-    catch { set opened $::lumen::flow_opened($page) }
+    if { [info exists ::lumen::flow_opened($page)] } { set opened $::lumen::flow_opened($page) }
     if { $st < $opened } { return 0 }
     return [expr {($sp - $st) / 1000}]
 }
 
 proc ::lumen::data::_flow_text { page start_key stop_key } {
-    set t 0
-    catch { set t [_flow_secs $page $start_key $stop_key] }
-    return "[format %.0f [_sane_secs $t]]s"
+    return "[format %.0f [_sane_secs [_flow_secs $page $start_key $stop_key]]]s"
 }
 
 # Each page reads ITS OWN timer. They used to share espresso_secs, which is
@@ -2330,18 +2344,18 @@ proc ::lumen::data::flush_secs {} {
 # set point underneath, so the number reads as intentional.
 proc ::lumen::data::steam_target_note {} {
     set t [_s ::settings(steam_temperature)]
-    if { ![string is double -strict $t] || $t <= 0 } { return "" }
-    if { [catch { set out [return_temperature_measurement $t 1] }] } { return "" }
-    return "[translate {target}] $out"
+    if { ![_is_num $t] || $t <= 0 } { return "" }
+    if { ![llength [info commands return_temperature_measurement]] } { return "" }
+    return "[translate {target}] [return_temperature_measurement $t 1]"
 }
 
 # ---- machine stepper readouts (Lumen settings page) -----------------------
 
 proc ::lumen::data::brew_temp_value {} {
     set t [_s ::settings(espresso_temperature)]
-    if { ![string is double -strict $t] } { return "--" }
-    if { [catch { set out [return_temperature_measurement $t 0] }] } { return "--" }
-    return $out
+    if { ![_is_num $t] } { return "--" }
+    if { ![llength [info commands return_temperature_measurement]] } { return "--" }
+    return [return_temperature_measurement $t 0]
 }
 
 proc ::lumen::data::steam_time_value {} {
@@ -2461,9 +2475,9 @@ proc ::lumen::data::water_volume_value {} {
 
 proc ::lumen::data::water_temp_note {} {
     set t [_s ::settings(water_temperature)]
-    if { ![string is double -strict $t] } { return "" }
-    if { [catch { set out [return_temperature_measurement $t 1] }] } { return "" }
-    return $out
+    if { ![_is_num $t] } { return "" }
+    if { ![llength [info commands return_temperature_measurement]] } { return "" }
+    return [return_temperature_measurement $t 1]
 }
 
 # The theme that is on screen right now. 0.47.0: a tap applies live, so
@@ -2545,16 +2559,19 @@ proc ::lumen::data::bag_position {} {
 # (bluetooth.tcl:2640-2645), so it stays fresh for as long as there is a
 # reading to show -- including while the machine is idle. 10s is the core's
 # own staleness threshold (bluetooth.tcl:1693).
+# 0.64.8: last_ping does not exist until the machine first answers (only
+# bluetooth.tcl sets it), so with the DE1 off it is missing on every tick:
+# read with _s, not caught.
 proc ::lumen::data::_water_ml_num {} {
-    set ping 0
-    catch { set ping $::de1(last_ping) }
-    if { ![string is double -strict $ping] || $ping <= 0 } { return "" }
+    set ping [_s ::de1(last_ping) 0]
+    if { ![_is_num $ping] || $ping <= 0 } { return "" }
     if { [expr {[clock seconds] - $ping}] > 10 } { return "" }
 
     set mm [_s ::de1(water_level)]
-    if { ![string is double -strict $mm] || $mm <= 0 } { return "" }
-    if { [catch { set ml [water_tank_level_to_milliliters $mm] }] } { return "" }
-    if { ![string is double -strict $ml] } { return "" }
+    if { ![_is_num $mm] || $mm <= 0 } { return "" }
+    if { ![llength [info commands water_tank_level_to_milliliters]] } { return "" }
+    set ml [water_tank_level_to_milliliters $mm]
+    if { ![_is_num $ml] } { return "" }
     return [expr {round($ml)}]
 }
 
@@ -2568,11 +2585,9 @@ proc ::lumen::data::_water_ml_num {} {
 # hand-edited settings file can never push it outside 100..800.
 proc ::lumen::water_low_ml {} {
     set v 300
-    catch {
-        if { [info exists ::settings(lumen_water_low_ml)] \
-          && $::settings(lumen_water_low_ml) ne "" } {
-            set v $::settings(lumen_water_low_ml)
-        }
+    if { [info exists ::settings(lumen_water_low_ml)] \
+      && $::settings(lumen_water_low_ml) ne "" } {
+        set v $::settings(lumen_water_low_ml)
     }
     if { ![string is integer -strict $v] } { set v 300 }
     if { $v < 100 } { set v 100 }
@@ -3426,8 +3441,7 @@ namespace eval ::lumen {
 proc ::lumen::data::_sep {} { return "  [::lumen::glyph dot]  " }
 
 proc ::lumen::data::clean_loaded {} {
-    set bev ""
-    catch { set bev [string tolower [string trim $::settings(beverage_type)]] }
+    set bev [string tolower [string trim [_s ::settings(beverage_type)]]]
     return [expr {$bev eq "cleaning"}]
 }
 
@@ -3715,7 +3729,8 @@ proc ::lumen::data::live_weight {} {
 }
 
 proc ::lumen::data::scale_connected {} {
-    if { [catch { set c [::device::scale::is_connected] }] } { return 0 }
+    if { ![llength [info commands ::device::scale::is_connected]] } { return 0 }
+    set c [::device::scale::is_connected]
     if { [string is true -strict $c] || $c == 1 } { return 1 }
     return 0
 }
@@ -3736,8 +3751,7 @@ proc ::lumen::data::scale_bt {} {
 # the core's 10-second-per-attempt retry loop.
 proc ::lumen::data::scale_connecting {} {
     if { ![info exists ::currently_connecting_scale_handle] } { return 0 }
-    if { [catch { set c [expr {$::currently_connecting_scale_handle != 0}] }] } { return 0 }
-    return $c
+    return [expr {$::currently_connecting_scale_handle != 0}]
 }
 
 # 0.43.1: "Connecting" with no exit. With the scale switched off the core's
@@ -3775,7 +3789,7 @@ proc ::lumen::data::scale_weight_line {} {
     if { $w eq "" } { return "--" }
     # An idle scale drifts a hair below zero and %.1f then prints "-0.0",
     # which looks broken. Anything inside a tenth is zero.
-    if { ![catch { set n [expr {double($w)}] }] && abs($n) < 0.05 } { set w 0 }
+    if { [_is_num $w] && abs($w) < 0.05 } { set w 0 }
     return "[_num $w 1] g"
 }
 
@@ -3882,10 +3896,8 @@ proc ::lumen::bag_index {} {
 # an unknown or missing value falls back rather than throwing.
 proc ::lumen::steam_mode {} {
     set v "time"
-    catch {
-        if { [info exists ::settings(lumen_steam_mode)] } {
-            set v $::settings(lumen_steam_mode)
-        }
+    if { [info exists ::settings(lumen_steam_mode)] } {
+        set v $::settings(lumen_steam_mode)
     }
     if { $v ne "flow" } { set v "time" }
     return $v
@@ -3894,10 +3906,8 @@ proc ::lumen::steam_mode {} {
 # Same for HOT WATER: "temp" or "vol".
 proc ::lumen::water_mode {} {
     set v "temp"
-    catch {
-        if { [info exists ::settings(lumen_water_mode)] } {
-            set v $::settings(lumen_water_mode)
-        }
+    if { [info exists ::settings(lumen_water_mode)] } {
+        set v $::settings(lumen_water_mode)
     }
     if { $v ne "vol" } { set v "temp" }
     return $v
@@ -3905,11 +3915,9 @@ proc ::lumen::water_mode {} {
 
 proc ::lumen::bag_count {} {
     set v 5
-    catch {
-        if { [info exists ::settings(lumen_bag_count)] \
-          && $::settings(lumen_bag_count) ne "" } {
-            set v $::settings(lumen_bag_count)
-        }
+    if { [info exists ::settings(lumen_bag_count)] \
+      && $::settings(lumen_bag_count) ne "" } {
+        set v $::settings(lumen_bag_count)
     }
     if { ![string is integer -strict $v] } { set v 5 }
     if { $v < 3 }  { set v 3 }
@@ -4065,7 +4073,7 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} {bag ""} } {
         # guard also makes the plain call a no-op forever after -- once a
         # shot is loaded the vectors always hold samples -- which is fine at
         # startup and exactly why the reload path below cannot use it.
-        if { ![catch { set n [espresso_elapsed length] }] && $n > 1 } { return }
+        if { [llength [info commands espresso_elapsed]] && [espresso_elapsed length] > 1 } { return }
     } else {
         # Reload path (0.28.0): the vectors legitimately hold the previous
         # shot, so length proves nothing. The real "shot in progress" signal
@@ -4075,7 +4083,7 @@ proc ::lumen::load_last_shot_curves { {force 0} {path ""} {bag ""} } {
         # (see the CRITICAL block below). So 0 here means live unsaved
         # samples, and reloading would clobber a shot mid-pull or arm the
         # 0.27.1 overwrite; refuse loudly rather than silently.
-        if { ![catch { set hs $::settings(history_saved) }] && !$hs } {
+        if { [info exists ::settings(history_saved)] && !$::settings(history_saved) } {
             msg -INFO "Lumen: history reload skipped, a shot is in progress"
             return
         }
@@ -4371,8 +4379,8 @@ proc ::lumen::glass_material {} {
     variable theme_mode
 
     set pg ""
-    catch { set pg $::de1(current_context) }
-    if { $pg eq "" } { catch { set pg [dui page current] } }
+    if { [info exists ::de1(current_context)] } { set pg $::de1(current_context) }
+    if { $pg eq "" && [llength [info commands dui]] } { set pg [dui page current] }
     if { $pg ne "off" } { return {} }
 
     # 0.62.0 (F8): the folder is named for the app's screen (dui's

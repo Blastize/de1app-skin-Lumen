@@ -4,6 +4,27 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.64.8 - Lumen's own reads on the 200 ms tick test their state instead of catching (pass 26, 2026-10-21) - TABLET-VERIFIED 14:45 (verify.sh PASS run 1)
+
+Base: 0.64.7 (b236fff). Patch, protocol lane (tick path). The bare catches 0.64.6 left on Lumen's own core reads.
+- A swallowed catch still sets ::errorInfo, which the core's BLE runner prints as "BLE error info ...". Routine on the
+  tick: ::de1(last_ping) before the DE1 first answers (home water readout, 2x per tick with the machine off); ::timers
+  after clear_espresso_timers (steam / water / flush timers after any shot); flow_opened before a flow page's first
+  show; ::settings(beverage_type) (cleaning banner). Now `info exists` / `_s`.
+- Core commands (espresso_elapsed and the chart vectors, return_temperature_measurement,
+  water_tank_level_to_milliliters, ::device::scale::is_connected): `info commands` first.
+- New `data::_is_num` (string is double, not NaN) before every number the helpers format or compare; a NaN chart
+  sample reads as no sample (the legend raised). Catches that could not fail (steam_mode, water_mode, bag_count,
+  water_low_ml, scale_connecting) unwrapped. Off the tick, same shape: glass_material, load_last_shot_curves.
+- Kept: catches that log, file / shot-file parsing, `_measure`'s font measure, tap-path reads (machine_busy,
+  set_dose_from_scale).
+- Tests: pass_26_offline 17/17 (every ::lumen::data accessor in six states: errorInfo empty, nothing raised, text as
+  0.64.7; the 0.64.7 copy fails 9, errorInfo dirty in 162 calls); pass_15 extracts `_is_num`; check_skin's hostile
+  case has no shot vector (a BLT vector never throws on length); the whole chain.
+  Tablet: home as 0.64.7 (water, last shot time, legend values, ratio, scale state); no Lumen "BLE error info".
+
+**Safety status:** no write behaviour added or changed; only reads, now tested before they are made.
+
 ## 0.64.7 - The cleaning banner forgets an old switch-back refusal (pass 25, 2026-10-21) - TABLET-VERIFIED 14:08 (verify.sh PASS run 1)
 
 Base: 0.64.6 (1e74d6d). Patch, protocol lane. Two display bugs from the parent session's review of 0.64.5-0.64.6,
