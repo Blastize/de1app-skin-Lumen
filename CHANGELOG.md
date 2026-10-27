@@ -4,6 +4,21 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.66.0 - A 0.1 / 0.5 / 1.0 step for the home DOSE and YIELD steppers too (pass 29, 2026-10-28) - TABLET-VERIFIED 2026-10-28 02:47 (verify.sh PASS run 1)
+
+Base: 0.65.0 (bf9bd53, tablet-verified). Minor, protocol lane (two new preferences). Owner: "Add step for Dose and Yield as well".
+- DOSE and YIELD get the crema "Step 0.1" link over their + pill, like GRIND's; a tap on the group's label row cycles
+  0.1 / 0.5 / 1.0. Each group keeps its own step, snapped to its grid as grind's (18.2 +0.5 -> 18.5). Clamps unchanged
+  (dose 2..40, yield 0..200); hold-to-repeat and the deferred save unchanged.
+- One code path for all three: `::lumen::step_of key` / `act::toggle_step key` / `data::step_label key` replace the
+  grind-only `grind_step` / `toggle_grind_step` / `grind_step_label`; the link is built in the group loop. Grind keeps
+  its `lumen_grind_step` key, so the owner's saved step carries over.
+- Tests: pass_29_offline 10/10 (new); pass_28 moved to the new names (26/26); pass_24 proc pattern; the whole chain.
+
+**Safety status:** no new file and no new kind of write. Two new preference writes, `lumen_dose_step` and
+`lumen_yield_step`, through `save_settings` on their own tap, exactly as `lumen_grind_step`. The next-shot value writes
+are unchanged from 0.65.0. Nothing touches history, SDB or the machine.
+
 ## 0.65.0 - Home steppers: one step per tap, hold to repeat, instant value, one deferred save; a 0.1 / 0.5 / 1.0 grind step (pass 28, 2026-10-27) - TABLET-VERIFIED 2026-10-28 00:24 (verify.sh PASS run 1)
 
 Base: 0.64.9 (e96fcf8). Minor, protocol lane (persistence timing, new preference). Owner: the steppers "don't feel fluid".

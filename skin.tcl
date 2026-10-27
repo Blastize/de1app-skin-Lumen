@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.65.0  (home steppers: hold to repeat, instant value, one
-#                    deferred save; a 0.1 / 0.5 / 1.0 grind step; see
+#  Version: 0.66.0  (a 0.1 / 0.5 / 1.0 step for dose and yield too, like
+#                    grind's; see
 #                    `variable version`)
 #
 #
@@ -121,7 +121,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.65.0"
+    variable version "0.66.0"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -2128,9 +2128,10 @@ proc ::lumen::data::next_grind {} {
     return $v
 }
 
-# 0.65.0: the grind stepper's step, as the link over its + pill reads it.
-proc ::lumen::data::grind_step_label {} {
-    return "[translate {Step}] [::lumen::grind_step]"
+# A stepper's step, as the link over its + pill reads it (0.65.0 grind,
+# 0.66.0 dose and yield).
+proc ::lumen::data::step_label { key } {
+    return "[translate {Step}] [::lumen::step_of $key]"
 }
 
 proc ::lumen::data::next_dose {} {
@@ -4697,28 +4698,30 @@ namespace eval ::lumen::act {
 #    there -- but the files are written once, 700 ms after the last change
 #    (_save_soon). save_settings re-reads, compares and rewrites the whole
 #    settings file (utils.tcl:1475), which on every tap was the stutter.
-# The grind step is the owner's choice of 0.1 / 0.5 / 1.0 (grind_step, the
-# "Step" link beside the GRIND label); dose and yield keep 0.1.
-proc ::lumen::grind_step {} {
+# Each stepper's step is the owner's choice of 0.1 / 0.5 / 1.0 (step_of, the
+# "Step" link over its + pill), kept in ::settings(lumen_<key>_step). 0.65.0
+# gave grind one; 0.66.0 gave dose and yield theirs (owner request).
+proc ::lumen::step_of { key } {
     set v ""
-    if { [info exists ::settings(lumen_grind_step)] } { set v $::settings(lumen_grind_step) }
+    if { [info exists ::settings(lumen_${key}_step)] } { set v $::settings(lumen_${key}_step) }
     if { $v in {0.5 1.0} } { return $v }
     return 0.1
 }
 
-proc ::lumen::act::toggle_grind_step {} {
-    switch -- [::lumen::grind_step] {
+proc ::lumen::act::toggle_step { key } {
+    if { $key ni {grind dose yield} } { return }
+    switch -- [::lumen::step_of $key] {
         0.1     { set new 0.5 }
         0.5     { set new 1.0 }
         default { set new 0.1 }
     }
     if { [catch {
-        set ::settings(lumen_grind_step) $new
+        set ::settings(lumen_${key}_step) $new
         save_settings
     } err] } {
-        msg -ERROR "Lumen: could not save the grind step: $err"
+        msg -ERROR "Lumen: could not save the $key step: $err"
     }
-    .can itemconfigure lumen_grind_step_lbl -text [::lumen::data::grind_step_label]
+    .can itemconfigure lumen_${key}_step_lbl -text [::lumen::data::step_label $key]
 }
 
 # One step from cur in direction dir, on the step's own grid: with a 0.5
@@ -5230,7 +5233,7 @@ proc ::lumen::act::adjust_grind { dir } {
     set cur [::lumen::data::_field grinder_setting]
     if { ![string is double -strict $cur] } { set cur 0 }
     set dir [expr {$dir >= 0 ? 1 : -1}]
-    set new [_step_from $cur $dir [::lumen::grind_step]]
+    set new [_step_from $cur $dir [::lumen::step_of grind]]
     if { $new < 0 } { set new 0 } elseif { $new > 100 } { set new 100 }
     set new [format %.1f $new]
     if { $new eq [format %.1f $cur] } { return 0 }
@@ -5442,7 +5445,7 @@ proc ::lumen::act::adjust_dose { dir } {
     set cur [::lumen::data::_s ::settings(grinder_dose_weight)]
     if { ![string is double -strict $cur] } { set cur 0 }
     set dir [expr {$dir >= 0 ? 1 : -1}]
-    set new [_step_from $cur $dir 0.1]
+    set new [_step_from $cur $dir [::lumen::step_of dose]]
     # DSx2's dose stepper clamps 2..40; a dose outside that is a mis-tap.
     if { $new < 2 } { set new 2 } elseif { $new > 40 } { set new 40 }
     set new [format %.1f $new]
@@ -5465,7 +5468,7 @@ proc ::lumen::act::adjust_yield { dir } {
     set cur [::lumen::data::_target_raw]
     if { ![string is double -strict $cur] } { set cur 0 }
     set dir [expr {$dir >= 0 ? 1 : -1}]
-    set new [_step_from $cur $dir 0.1]
+    set new [_step_from $cur $dir [::lumen::step_of yield]]
     if { $new < 0 } { set new 0 } elseif { $new > 200 } { set new 200 }
     set new [format %.1f $new]
     if { $new eq [format %.1f $cur] } { return 0 }
@@ -8395,21 +8398,19 @@ proc ::lumen::build_home {} {
         set minus_code [list ::lumen::act::hold_start $key -1]
         set plus_code  [list ::lumen::act::hold_start $key 1]
 
-        # 0.65.0 (owner request): the grind step, a crema link right-aligned
-        # over the + pill ("Step 0.1"); a tap cycles 0.1 / 0.5 / 1.0. Its
-        # zone is the whole label row of the group, from 16 above the label
-        # down to 2 short of the pills' own zones (step_hit_v), so it never
-        # takes a stepper tap.
-        if { $key eq "grind" } {
-            set gw [expr {2 * $L(step_w) + 2 * $L(step_gap) + $L(step_val_w)}]
-            var $p [expr {$kx + $gw}] $by2 {[::lumen::data::grind_step_label]} \
-                -font $L(font_label) -fill $C(crema_ink) -anchor ne -justify right \
-                -tags lumen_grind_step_lbl
-            set zy1 [expr {$by2 - 16}]
-            set zy2 [expr {$L(step_y) - $L(step_hit_v) - 2}]
-            tap $p $kx $zy1 $gw [expr {$zy2 - $zy1}] \
-                {::lumen::act::toggle_grind_step} "Grind step" label
-        }
+        # The group's step, a crema link right-aligned over the + pill
+        # ("Step 0.1"); a tap cycles 0.1 / 0.5 / 1.0 (0.65.0 grind, 0.66.0
+        # dose and yield, owner requests). Its zone is the whole label row
+        # of the group, from 16 above the label down to 2 short of the
+        # pills' own zones (step_hit_v), so it never takes a stepper tap.
+        set gw [expr {2 * $L(step_w) + 2 * $L(step_gap) + $L(step_val_w)}]
+        var $p [expr {$kx + $gw}] $by2 "\[::lumen::data::step_label $key\]" \
+            -font $L(font_label) -fill $C(crema_ink) -anchor ne -justify right \
+            -tags lumen_${key}_step_lbl
+        set zy1 [expr {$by2 - 16}]
+        set zy2 [expr {$L(step_y) - $L(step_hit_v) - 2}]
+        tap $p $kx $zy1 $gw [expr {$zy2 - $zy1}] \
+            [list ::lumen::act::toggle_step $key] "$what step" label
 
         set mx $kx
         set px2 [expr {$kx + $L(step_w) + $L(step_gap) + $L(step_val_w) + $L(step_gap)}]

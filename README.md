@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.65.0 · a skin for the Decent DE1app · by Blastize
+Version 0.66.0 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,16 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.65.0 — every page built, baked and running on the tablet.**
+**Version 0.66.0 — every page built, baked and running on the tablet.**
 
-New in 0.65.0: **smoother grind, dose and yield buttons.** A tap is
+New in 0.66.0: **a step for dose and yield too.** DOSE and YIELD now have
+their own **Step 0.1** link at the right of the label, just like GRIND:
+tap it for 0.5 or 1.0. Each of the three keeps its own step, so you can
+move the grind in halves, the dose in tenths and the yield in whole
+grams. As with the grind, a 0.5 step first rounds to the half (a dose of
+18.2 goes to 18.5 or 18.0), then moves in halves.
+
+Earlier, 0.65.0: **smoother grind, dose and yield buttons.** A tap is
 exactly one step, and the number changes the moment your finger lands,
 instead of up to a fifth of a second later. Hold a button to keep going:
 after a short pause it repeats and speeds up, and it stops as soon as you
@@ -459,7 +466,7 @@ backdrop and let the shadow do the separating.
 | Next shot | The profile, the roaster, the bean, and its tasting notes | PROFILE row opens the app's profile chooser |
 | ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
-| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap one step (grind: your Step, 0.1 / 0.5 / 1.0; dose and yield 0.1); hold to repeat, faster the longer you hold (0.65.0) |
+| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap one step, the group's own Step link (0.1 / 0.5 / 1.0; grind 0.65.0, dose and yield 0.66.0); hold to repeat, faster the longer you hold (0.65.0) |
 | Scale readout | Live weight, or `Connecting` (then `Tap to retry` after 30 s) / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
 | Scan bag | — | Bean Scanner |
@@ -762,8 +769,9 @@ clamps its value. Three groups:
 
 * **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
   depth), `lumen_time_format` / `lumen_date_format` (taskbar clock),
-  `lumen_water_low_ml` (amber threshold, 100–800), `lumen_grind_step`
-  (the grind stepper's step, 0.1 / 0.5 / 1.0; 0.65.0), the custom theme's
+  `lumen_water_low_ml` (amber threshold, 100–800), `lumen_grind_step` /
+  `lumen_dose_step` / `lumen_yield_step` (each stepper's step, 0.1 / 0.5 /
+  1.0; grind 0.65.0, dose and yield 0.66.0), the custom theme's
   `lumen_custom_base` / `_bh` / `_bs` / `_ah` / `_as` (picker Done only),
   and `lumen_fav_profiles` (the three favorite slots: a tap on an empty
   slot stores the loaded profile's filename and title; the settings
