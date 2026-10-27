@@ -6,8 +6,8 @@ package require de1plus 1.0
 #
 #  Author:  Blastize
 #  SPDX-License-Identifier: GPL-3.0-or-later
-#  Version: 0.64.9  (only finite numbers on the tick; the cleaning banner
-#                    forgets a tap's answer on any profile load; see
+#  Version: 0.65.0  (home steppers: hold to repeat, instant value, one
+#                    deferred save; a 0.1 / 0.5 / 1.0 grind step; see
 #                    `variable version`)
 #
 #
@@ -121,7 +121,7 @@ package require de1plus 1.0
 #############################################################################
 
 namespace eval ::lumen {
-    variable version "0.64.9"
+    variable version "0.65.0"
 
     # 0.64.0: this skin's own folder, taken once while skin.tcl is sourced
     # (gui.tcl sources [skin_directory]/skin.tcl). Shipped read-only assets
@@ -2126,6 +2126,11 @@ proc ::lumen::data::next_grind {} {
     set v [_field grinder_setting]
     if { $v eq "" } { return "--" }
     return $v
+}
+
+# 0.65.0: the grind stepper's step, as the link over its + pill reads it.
+proc ::lumen::data::grind_step_label {} {
+    return "[translate {Step}] [::lumen::grind_step]"
 }
 
 proc ::lumen::data::next_dose {} {
@@ -4659,39 +4664,162 @@ proc ::lumen::chart_setup { widget } {
 #############################################################################
 
 namespace eval ::lumen::act {
-    # Per-stepper tap-rate state: key -> {last_ms streak dir}.
-    variable accel
-    array set accel {}
+    # 0.65.0 hold-to-repeat state of the three home steppers: the stepper
+    # held (grind / dose / yield, "" when none), its direction, the pending
+    # repeat's after id and how many repeats it has run.
+    variable hold
+    array set hold {key "" dir 0 id "" n 0}
+    # 0.65.0 deferred save: which files a stepper change left unsaved (the
+    # core's settings, DYE's) and the pending flush's after id.
+    variable dirty
+    array set dirty {core 0 dye 0 id ""}
 }
 
-# Tap-rate acceleration for the grind / dose / yield steppers (owner
-# request): a slow tap moves 0.1; taps in RAPID succession escalate to 0.5
-# after three and 1.0 after six, so a big adjustment does not take forty
-# taps. A pause or a direction change drops straight back to 0.1. The app's
-# legacy buttons fire once per press (there is no hold event), so holding
-# registers as its taps do.
-#
-# The window is 350ms (0.28.1). It shipped at 700ms, and the owner's
-# careful step-step-step pace -- roughly 500-700ms per tap -- landed
-# inside it, so deliberate 0.1 nudges escalated to 0.5 mid-adjustment.
-# Escalation is meant for drumming on the button (3+ taps a second, i.e.
-# under ~350ms apart); a measured pace must stay at 0.1 no matter how many
-# taps it runs to.
-proc ::lumen::act::_accel_step { key dir } {
-    variable accel
-    set now [clock milliseconds]
-    set last 0 ; set streak 0 ; set lastdir 0
-    catch { lassign $accel($key) last streak lastdir }
-    if { $dir == $lastdir && ($now - $last) < 350 } {
-        incr streak
-    } else {
-        set streak 0
-    }
-    set accel($key) [list $now $streak $dir]
-    if { $streak >= 6 } { return 1.0 }
-    if { $streak >= 3 } { return 0.5 }
+# Home grind / dose / yield steppers (0.65.0, owner request: "doesn't feel
+# fluid"). Replaces 0.28.1's tap-rate escalation, where a third quick tap
+# jumped to 0.5 and a sixth to 1.0 -- the step changed under the finger.
+# Now it works like the platform steppers (iOS UIStepper, Android number
+# pickers):
+#  * A tap is exactly ONE step, applied on the press, and the value on
+#    screen changes in the same event (_repaint), not on the next 200 ms
+#    refresh tick (dui timer_interval).
+#  * Holding repeats: the first repeat 450 ms after the press, then every
+#    140 ms, quickening by 8 ms a repeat to a 60 ms floor (~16 steps a
+#    second). Lifting the finger stops it. It also stops at the clamp, on
+#    a page change and after hold_max repeats (about 5 s), so a missed lift
+#    can never run the value away.
+#  * The finger's lift is the core's own unpress event (dui platform
+#    button_unpress: <<FingerUp>> on Android, ButtonRelease-1 elsewhere --
+#    what dui's long-press uses, dui.tcl). It is bound once on the WHOLE
+#    canvas, added after the core's bindings (+), so a finger that slides
+#    off the pill before lifting still stops the repeat.
+#  * The values change in memory at once -- the next shot reads them from
+#    there -- but the files are written once, 700 ms after the last change
+#    (_save_soon). save_settings re-reads, compares and rewrites the whole
+#    settings file (utils.tcl:1475), which on every tap was the stutter.
+# The grind step is the owner's choice of 0.1 / 0.5 / 1.0 (grind_step, the
+# "Step" link beside the GRIND label); dose and yield keep 0.1.
+proc ::lumen::grind_step {} {
+    set v ""
+    if { [info exists ::settings(lumen_grind_step)] } { set v $::settings(lumen_grind_step) }
+    if { $v in {0.5 1.0} } { return $v }
     return 0.1
 }
+
+proc ::lumen::act::toggle_grind_step {} {
+    switch -- [::lumen::grind_step] {
+        0.1     { set new 0.5 }
+        0.5     { set new 1.0 }
+        default { set new 0.1 }
+    }
+    if { [catch {
+        set ::settings(lumen_grind_step) $new
+        save_settings
+    } err] } {
+        msg -ERROR "Lumen: could not save the grind step: $err"
+    }
+    .can itemconfigure lumen_grind_step_lbl -text [::lumen::data::grind_step_label]
+}
+
+# One step from cur in direction dir, on the step's own grid: with a 0.5
+# step, 12.3 goes up to 12.5 and down to 12.0, then whole steps. A 0.1 step
+# moves exactly as before. The 1e-6 absorbs binary fractions (15.1 / 0.1 is
+# 150.99999999999997).
+proc ::lumen::act::_step_from { cur dir step } {
+    set q [expr {double($cur) / $step}]
+    if { $dir > 0 } {
+        set k [expr {floor($q + 1e-6) + 1}]
+    } else {
+        set k [expr {ceil($q - 1e-6) - 1}]
+    }
+    return [expr {$k * $step}]
+}
+
+proc ::lumen::act::hold_start { key dir } {
+    variable hold
+    hold_stop
+    if { ![_step_once $key $dir] } { return }
+    set hold(key) $key ; set hold(dir) $dir ; set hold(n) 0
+    set hold(id) [after 450 ::lumen::act::_hold_tick]
+}
+
+proc ::lumen::act::hold_stop {} {
+    variable hold
+    if { $hold(id) ne "" } { after cancel $hold(id) }
+    set hold(id) "" ; set hold(key) "" ; set hold(n) 0
+}
+
+proc ::lumen::act::_hold_tick {} {
+    variable hold
+    set hold(id) ""
+    if { $hold(key) eq "" } { return }
+    incr hold(n)
+    if { $hold(n) > 80 || [dui page current] ne "off" \
+             || ![_step_once $hold(key) $hold(dir)] } {
+        hold_stop
+        return
+    }
+    set hold(id) [after [expr {max(60, 140 - 8 * $hold(n))}] ::lumen::act::_hold_tick]
+}
+
+# One step of one stepper, then its value repainted. 1 if the value moved,
+# 0 at a clamp or when the write failed (both end a hold).
+proc ::lumen::act::_step_once { key dir } {
+    switch -- $key {
+        grind   { set moved [adjust_grind $dir] }
+        dose    { set moved [adjust_dose $dir] }
+        yield   { set moved [adjust_yield $dir] }
+        default { return 0 }
+    }
+    if { $moved } { _repaint $key }
+    return $moved
+}
+
+# Paint a stepper's value now instead of on the next refresh tick. The
+# tags are the value items' own (build_home); the tick keeps writing the
+# same text, so the two never disagree.
+proc ::lumen::act::_repaint { key } {
+    switch -- $key {
+        grind { .can itemconfigure lumen_sv_grind -text [::lumen::data::next_grind] }
+        dose  { .can itemconfigure lumen_sv_dose -text [::lumen::data::next_dose] }
+        yield { .can itemconfigure lumen_sv_yield -text [::lumen::data::next_yield] }
+    }
+    if { $key in {dose yield} } {
+        .can itemconfigure lumen_sn_yield -text [::lumen::data::next_ratio_note]
+    }
+}
+
+proc ::lumen::act::_save_soon { what } {
+    variable dirty
+    set dirty($what) 1
+    if { $dirty(id) ne "" } { after cancel $dirty(id) }
+    set dirty(id) [after 700 ::lumen::act::_save_now]
+}
+
+proc ::lumen::act::_save_now {} {
+    variable dirty
+    if { $dirty(id) ne "" } { after cancel $dirty(id) }
+    set dirty(id) ""
+    if { $dirty(dye) } {
+        set dirty(dye) 0
+        if { [catch { plugins save_settings DYE } err] } {
+            msg -ERROR "Lumen: could not save DYE's next-shot values: $err"
+        }
+        # DYE keeps a human-readable summary of the next shot; refresh it
+        # once per run of taps, the way its own stepper does per change.
+        _dye_next_desc
+    }
+    if { $dirty(core) } {
+        set dirty(core) 0
+        if { [catch { save_settings } err] } {
+            msg -ERROR "Lumen: could not save the next-shot settings: $err"
+        }
+    }
+}
+
+# The lift that ends a hold, on the whole canvas (see above). Bound once,
+# while skin.tcl is sourced; `+` keeps every binding the core already has.
+bind .can [dui platform button_unpress] {+::lumen::act::hold_stop}
 
 proc ::lumen::act::grind_popup {} {
     if { [catch {
@@ -5091,29 +5219,33 @@ proc ::lumen::act::set_dose_from_scale {} {
 #   ratio  -- DSx2 procs_vars.tcl "er" stepper: a ratio change is just a
 #             yield write of dose * new_ratio.
 # Every path clamps, so holding the button cannot write junk.
+#
+# 0.65.0: each adjuster takes ONE step in direction dir (hold_start /
+# _hold_tick call it), returns 1 if the value moved and 0 at a clamp or on
+# a failed write, and leaves the file writes to _save_soon (the values
+# themselves change in memory at once).
 
-proc ::lumen::act::adjust_grind { delta } {
+proc ::lumen::act::adjust_grind { dir } {
     # Read the same source the strip displays (DYE's staged value first).
     set cur [::lumen::data::_field grinder_setting]
     if { ![string is double -strict $cur] } { set cur 0 }
-    set dir [expr {$delta >= 0 ? 1 : -1}]
-    set new [expr {double($cur) + $dir * [_accel_step grind $dir]}]
+    set dir [expr {$dir >= 0 ? 1 : -1}]
+    set new [_step_from $cur $dir [::lumen::grind_step]]
     if { $new < 0 } { set new 0 } elseif { $new > 100 } { set new 100 }
     set new [format %.1f $new]
+    if { $new eq [format %.1f $cur] } { return 0 }
     if { [catch {
         if { [::lumen::data::dye_live] && [info exists ::plugins::DYE::settings(next_grinder_setting)] } {
             set ::plugins::DYE::settings(next_grinder_setting) $new
-            plugins save_settings DYE
+            _save_soon dye
         }
         set ::settings(grinder_setting) $new
-        save_settings
+        _save_soon core
     } err] } {
         msg -ERROR "Lumen: could not change the grind setting: $err"
-        return
+        return 0
     }
-    # DYE keeps a human-readable summary of the next shot; refresh it the way
-    # its own stepper does. Absent, disabled or old DYE: nothing to refresh.
-    _dye_next_desc
+    return 1
 }
 
 # 0.64.2: the one DYE summary refresh both steppers use. Absent, disabled
@@ -5306,49 +5438,49 @@ proc ::lumen::act::adjust_water_low { delta } {
     }
 }
 
-proc ::lumen::act::adjust_dose { delta } {
+proc ::lumen::act::adjust_dose { dir } {
     set cur [::lumen::data::_s ::settings(grinder_dose_weight)]
     if { ![string is double -strict $cur] } { set cur 0 }
-    set dir [expr {$delta >= 0 ? 1 : -1}]
-    set new [expr {double($cur) + $dir * [_accel_step dose $dir]}]
+    set dir [expr {$dir >= 0 ? 1 : -1}]
+    set new [_step_from $cur $dir 0.1]
     # DSx2's dose stepper clamps 2..40; a dose outside that is a mis-tap.
     if { $new < 2 } { set new 2 } elseif { $new > 40 } { set new 40 }
     set new [format %.1f $new]
+    if { $new eq [format %.1f $cur] } { return 0 }
     if { [catch {
         if { [::lumen::data::dye_live] && [info exists ::plugins::DYE::settings(next_grinder_dose_weight)] } {
             set ::plugins::DYE::settings(next_grinder_dose_weight) $new
-            plugins save_settings DYE
+            _save_soon dye
         }
         set ::settings(grinder_dose_weight) $new
-        save_settings
+        _save_soon core
     } err] } {
         msg -ERROR "Lumen: could not change the dose: $err"
-        return
+        return 0
     }
-    _dye_next_desc
+    return 1
 }
 
-proc ::lumen::act::_write_yield { new } {
-    if { ![string is double -strict $new] } { return }
+proc ::lumen::act::adjust_yield { dir } {
+    set cur [::lumen::data::_target_raw]
+    if { ![string is double -strict $cur] } { set cur 0 }
+    set dir [expr {$dir >= 0 ? 1 : -1}]
+    set new [_step_from $cur $dir 0.1]
     if { $new < 0 } { set new 0 } elseif { $new > 200 } { set new 200 }
     set new [format %.1f $new]
+    if { $new eq [format %.1f $cur] } { return 0 }
     if { [catch {
         if { [string trim [::lumen::data::_s ::settings(settings_profile_type)]] eq "settings_2c" } {
             set ::settings(final_desired_shot_weight_advanced) $new
         } else {
             set ::settings(final_desired_shot_weight) $new
         }
-        save_settings
+        _save_soon core
     } err] } {
         msg -ERROR "Lumen: could not change the target yield: $err"
+        return 0
     }
-}
-
-proc ::lumen::act::adjust_yield { delta } {
-    set cur [::lumen::data::_target_raw]
-    if { ![string is double -strict $cur] } { set cur 0 }
-    set dir [expr {$delta >= 0 ? 1 : -1}]
-    _write_yield [expr {double($cur) + $dir * [_accel_step yield $dir]}]
+    return 1
 }
 
 # 0.21.0 removed ::lumen::act::adjust_ratio. The RATIO stepper gave up its
@@ -8247,16 +8379,37 @@ proc ::lumen::build_home {} {
     #
     # 0.23.0: PROFILE left this row for the identity block, so three columns
     # now span 520..1116 on a 210 pitch instead of four on a 206 pitch.
+    #
+    # 0.65.0: a pill's command is hold_start, which takes the first step on
+    # the press and repeats while the finger stays down (the settings
+    # page's steppers keep plain one-shot commands: they send to the
+    # machine). Each value item carries a lumen_sv_<key> tag so a step
+    # repaints it at once.
     set i 0
-    foreach {k code minus_code plus_code what} [list \
-        [translate "GRIND"]  {[::lumen::data::next_grind]} \
-            {::lumen::act::adjust_grind -0.1} {::lumen::act::adjust_grind 0.1} "Grind" \
-        [translate "DOSE"]   {[::lumen::data::next_dose]} \
-            {::lumen::act::adjust_dose -0.1}  {::lumen::act::adjust_dose 0.1}  "Dose" \
-        [translate "YIELD"]  {[::lumen::data::next_yield]} \
-            {::lumen::act::adjust_yield -0.1} {::lumen::act::adjust_yield 0.1} "Yield" ] {
+    foreach {k code key what} [list \
+        [translate "GRIND"]  {[::lumen::data::next_grind]} grind "Grind" \
+        [translate "DOSE"]   {[::lumen::data::next_dose]}  dose  "Dose" \
+        [translate "YIELD"]  {[::lumen::data::next_yield]} yield "Yield" ] {
         set kx [expr {$L(bean_fact_x) + $i * $L(bean_fact_w)}]
         txt $p $kx $by2 $k -font $L(font_label) -fill $C(ink_3)
+        set minus_code [list ::lumen::act::hold_start $key -1]
+        set plus_code  [list ::lumen::act::hold_start $key 1]
+
+        # 0.65.0 (owner request): the grind step, a crema link right-aligned
+        # over the + pill ("Step 0.1"); a tap cycles 0.1 / 0.5 / 1.0. Its
+        # zone is the whole label row of the group, from 16 above the label
+        # down to 2 short of the pills' own zones (step_hit_v), so it never
+        # takes a stepper tap.
+        if { $key eq "grind" } {
+            set gw [expr {2 * $L(step_w) + 2 * $L(step_gap) + $L(step_val_w)}]
+            var $p [expr {$kx + $gw}] $by2 {[::lumen::data::grind_step_label]} \
+                -font $L(font_label) -fill $C(crema_ink) -anchor ne -justify right \
+                -tags lumen_grind_step_lbl
+            set zy1 [expr {$by2 - 16}]
+            set zy2 [expr {$L(step_y) - $L(step_hit_v) - 2}]
+            tap $p $kx $zy1 $gw [expr {$zy2 - $zy1}] \
+                {::lumen::act::toggle_grind_step} "Grind step" label
+        }
 
         set mx $kx
         set px2 [expr {$kx + $L(step_w) + $L(step_gap) + $L(step_val_w) + $L(step_gap)}]
@@ -8283,14 +8436,14 @@ proc ::lumen::build_home {} {
         if { $what eq "Yield" } {
             var $p $vx [expr {$L(step_y) + 16}] $code \
                 -font $L(font_data) -fill $C(ink) \
-                -anchor center -justify center
+                -anchor center -justify center -tags lumen_sv_yield
             var $p $vx [expr {$L(step_y) + 38}] \
                 {[::lumen::data::next_ratio_note]} \
                 -font $L(font_caption) -fill $C(ink_3) \
-                -anchor center -justify center
+                -anchor center -justify center -tags lumen_sn_yield
         } else {
             var $p $vx $mid_y $code -font $L(font_data) -fill $C(ink) \
-                -anchor center -justify center
+                -anchor center -justify center -tags lumen_sv_$key
         }
 
         incr i

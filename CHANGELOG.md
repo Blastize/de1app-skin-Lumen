@@ -4,6 +4,27 @@ Entries follow a documentation cap (about 15 lines each; longer only where a
 version added or changed a write capability). The original long-form entries
 survive unchanged in the archive snapshot of each version.
 
+## 0.65.0 - Home steppers: one step per tap, hold to repeat, instant value, one deferred save; a 0.1 / 0.5 / 1.0 grind step (pass 28, 2026-10-27) - TABLET-VERIFIED 2026-10-28 00:24 (verify.sh PASS run 1)
+
+Base: 0.64.9 (e96fcf8). Minor, protocol lane (persistence timing, new preference). Owner: the steppers "don't feel fluid".
+- A tap on the home GRIND / DOSE / YIELD pills is exactly one step, on the press. 0.28.1's tap-rate escalation (a 3rd
+  quick tap 0.5, a 6th 1.0) is gone (`_accel_step` removed). Holding repeats: first repeat at 450 ms, then 140 ms
+  quickening 8 ms a repeat to a 60 ms floor; it stops on the lift (the core's `button_unpress` bound once on the whole
+  canvas with `+`, so a finger that slides off still stops it), at a clamp, off the home page, or after 80 repeats.
+- The value item repaints in the same event (`lumen_sv_<key>` tags; the ratio under the yield too), not on the next
+  200 ms refresh tick. The settings page's machine steppers keep their one-shot commands: they never repeat.
+- New preference `lumen_grind_step` (0.1 default / 0.5 / 1.0): a crema "Step 0.1" link right-aligned over the grind +
+  pill; a tap on the label row cycles it (`save_settings` on that tap). Steps snap to the step's grid (12.3 +0.5 ->
+  12.5). Dose and yield keep 0.1. The settings page had no free row (both columns full, rows baked).
+- Tests: pass_28_offline 26/26; pass_24 updated for the deferred save (15/15); check_skin section K rewritten for 0.65.0.
+
+**Safety status:** no new file and no new kind of write. Write path change: the next-shot values (`grinder_setting`,
+`grinder_dose_weight`, `final_desired_shot_weight[_advanced]`, DYE's `next_grinder_setting` /
+`next_grinder_dose_weight`) still change in memory on the tap, but `save_settings` / `plugins save_settings DYE` now run
+once, 700 ms after the last step (`_save_soon` / `_save_now`; a failure is logged), instead of on every tap. A crash
+or kill inside those 700 ms loses only the unsaved run of taps. One new preference write, `lumen_grind_step`, on its
+own tap. Nothing touches history, SDB or the machine.
+
 ## 0.64.9 - Only finite numbers on the tick; the cleaning banner forgets a tap's answer on any profile load (pass 27, 2026-10-21) - TABLET-VERIFIED 15:48 (verify.sh PASS run 1)
 
 Base: 0.64.8 (4a678a7). Patch, protocol lane. Lows from the parent session's review of 0.64.7-0.64.8.

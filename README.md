@@ -1,7 +1,7 @@
 # Lumen
 
 **A glass dashboard home screen for the Decent DE1: grind recommendation, last shot, shot graph and next-shot beans, without opening Settings.**
-Version 0.64.9 · a skin for the Decent DE1app · by Blastize
+Version 0.65.0 · a skin for the Decent DE1app · by Blastize
 
 ![The Lumen home screen in a custom theme: grind tile, last shot, live graph, next-shot strip, and the taskbar with three favorite profile names, the loaded one glowing](docs/home_custom_theme.png)
 
@@ -56,9 +56,20 @@ shot — all reachable without going into Settings. It is built to work with
 GrindAdvisor, DYE, Bean Scanner, ShotHistoryEditor, MaintenanceTracker
 and SDB.
 
-**Version 0.64.9 — every page built, baked and running on the tablet.**
+**Version 0.65.0 — every page built, baked and running on the tablet.**
 
-New in 0.64.9: **two small fixes.** A number that reads as infinite (a
+New in 0.65.0: **smoother grind, dose and yield buttons.** A tap is
+exactly one step, and the number changes the moment your finger lands,
+instead of up to a fifth of a second later. Hold a button to keep going:
+after a short pause it repeats and speeds up, and it stops as soon as you
+lift. Quick taps no longer jump to bigger steps on their own. The new
+values are saved once you stop, not on every tap, which was what made
+fast tapping stutter. And the grind's step is yours to choose: tap
+**Step 0.1** beside the GRIND label for 0.5 or 1.0 (handy for grinders
+with half or whole clicks). With 0.5, a grind of 15.1 goes to 15.5 or
+15.0 first, then moves in halves.
+
+Earlier, 0.64.9: **two small fixes.** A number that reads as infinite (a
 broken value in a shot or a bag) now reads as no value instead of
 putting an error in the log. And the cleaning banner forgets Maintenance Tracker's
 last answer whenever a profile is actually loaded, wherever you load it,
@@ -448,7 +459,7 @@ backdrop and let the shadow do the separating.
 | Next shot | The profile, the roaster, the bean, and its tasting notes | PROFILE row opens the app's profile chooser |
 | ◀ ▶ (next-shot card) | The bag being cycled, with a dot per reachable bag beside Edit — filled for the one loaded, leftmost the most recent | Steps through your recently used beans; the grind tile, chart and LAST SHOT card all switch to that bag (0.30.0). It does not wrap: at the newest or oldest bag, that direction stops |
 | Edit | — | Opens DYE's next-shot editor |
-| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap ±0.1; drumming rapidly (3+ taps a second) escalates to ±0.5 then ±1.0. Any measured pace stays at ±0.1 (0.28.1) |
+| − value + steppers | GRIND, DOSE, YIELD — the live value sits between the pills, with the derived ratio under the yield | Each tap one step (grind: your Step, 0.1 / 0.5 / 1.0; dose and yield 0.1); hold to repeat, faster the longer you hold (0.65.0) |
 | Scale readout | Live weight, or `Connecting` (then `Tap to retry` after 30 s) / `Connect` / `no scale` | Forces a scale reconnect |
 | Set dose | — | Stores the current scale weight as the dose |
 | Scan bag | — | Bean Scanner |
@@ -751,7 +762,8 @@ clamps its value. Three groups:
 
 * **Preferences:** `lumen_theme` (theme), `lumen_bag_count` (bag cycler
   depth), `lumen_time_format` / `lumen_date_format` (taskbar clock),
-  `lumen_water_low_ml` (amber threshold, 100–800), the custom theme's
+  `lumen_water_low_ml` (amber threshold, 100–800), `lumen_grind_step`
+  (the grind stepper's step, 0.1 / 0.5 / 1.0; 0.65.0), the custom theme's
   `lumen_custom_base` / `_bh` / `_bs` / `_ah` / `_as` (picker Done only),
   and `lumen_fav_profiles` (the three favorite slots: a tap on an empty
   slot stores the loaded profile's filename and title; the settings
@@ -785,7 +797,9 @@ clamps its value. Three groups:
   `final_desired_shot_weight_advanced` (yield and ratio steppers, 0..200).
   With DYE loaded, its staged `next_grinder_setting` and
   `next_grinder_dose_weight` are kept in step, the same pairing DYE's own
-  DSx2 stepper performs.
+  DSx2 stepper performs. Since 0.65.0 the values change in memory at
+  once and are written (`save_settings`, and DYE's settings when it is
+  loaded) once, 0.7 s after the last step, instead of on every tap.
 * **Machine steppers (settings page):** `espresso_temperature` (via the
   core's `change_espresso_temperature`, 70..110), `steam_timeout` +
   `steam_disabled` (0..255, 0 = off), `flush_seconds` (3..254),
